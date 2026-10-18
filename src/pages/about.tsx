@@ -1,4 +1,6 @@
-import { useState, useRef } from 'react';
+import { VersionSelector } from '@/components/VersionSelector';
+import { useVersion } from '@/contexts/VersionContext';
+import { DistDnaAbout } from '@/distdna/About';
 import { Card } from '@/components/Card';
 import { Flow, type FlowStep } from '@/components/Flow';
 import { CopyButton, ActionIcon, Tooltip, Button, Group, Text, Stack } from '@mantine/core';
@@ -39,74 +41,18 @@ const PAPERS: Paper[] = [
 ];
 
 export default function AboutPage() {
-    // Subscription form state
-    const [subscribeEmail, setSubscribeEmail] = useState('');
-    const [captchaToken, setCaptchaToken] = useState<string | null>(null);
-    const [submitting, setSubmitting] = useState(false);
-    const [status, setStatus] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
-    const turnstileRef = useRef<TurnstileInstance>(null);
-
-    const handleSubscribe = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setStatus(null);
-
-        if (!subscribeEmail.trim()) {
-            setStatus({ type: 'error', message: 'Please enter your email' });
-            return;
-        }
-
-        if (!captchaToken) {
-            setStatus({ type: 'error', message: 'Please complete the CAPTCHA' });
-            return;
-        }
-
-        setSubmitting(true);
-
-        try {
-            const response = await fetch('/api/subscribe', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    email: subscribeEmail.trim(),
-                    captchaToken
-                })
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || 'Subscription failed');
-            }
-
-            setStatus({
-                type: data.alreadySubscribed ? 'info' : 'success',
-                message: data.message
-            });
-            setSubscribeEmail('');
-            setCaptchaToken(null);
-            turnstileRef.current?.reset();
-
-        } catch (error) {
-            setStatus({
-                type: 'error',
-                message: error instanceof Error ? error.message : 'Subscription failed'
-            });
-            setCaptchaToken(null);
-            turnstileRef.current?.reset();
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
+    const {version}=useVersion();
     return (
         <div className="page about-page">
             <header className="page-header">
-                <h1 className="page-title">About LLM DNA</h1>
+                <h1 className="page-title">{version==='v2'?'About DistDNA':'About LLM DNA'}</h1>
                 <p className="page-subtitle">
-                    Tracing Model Evolution via Functional Representations
+                    {version==='v2'?'Identifying enrolled checkpoints from stochastic responses':'Tracing Model Evolution via Functional Representations'}
                 </p>
             </header>
 
+            <VersionSelector />
+            {version==='v2' ? <DistDnaAbout /> : <>
             <div className="mt-8">
                 <Card title="📄 Related Papers" titleClassName="text-accent">
                     <Stack gap="xl">
@@ -252,55 +198,7 @@ export default function AboutPage() {
                 </div>
             </Card>
 
-            {/* Subscribe Section - TEMPORARILY DISABLED
-            <Card title="💌 Subscribe" className="mt-8">
-                <p className="mb-4">
-                    Get the latest updates on new model DNAs and analysis features.
-                </p>
-                <form onSubmit={handleSubscribe}>
-                    <Stack gap="md">
-                        <TextInput
-                            label="Email Address"
-                            placeholder="name@example.com"
-                            type="email"
-                            value={subscribeEmail}
-                            onChange={(e) => setSubscribeEmail(e.target.value)}
-                            required
-                            disabled={submitting}
-                        />
-
-                        {/* Cloudflare Turnstile CAPTCHA 
-                        <div style={{ display: 'flex', justifyContent: 'center' }}>
-                            <Turnstile
-                                ref={turnstileRef}
-                                siteKey="0x4AAAAAACWqoNnjPjbJm3_c"
-                                onSuccess={(token) => setCaptchaToken(token)}
-                                onError={() => setCaptchaToken(null)}
-                                onExpire={() => setCaptchaToken(null)}
-                            />
-                        </div>
-
-                        {status && (
-                            <Alert
-                                color={status.type === 'success' ? 'green' : status.type === 'info' ? 'blue' : 'red'}
-                                variant="light"
-                            >
-                                {status.message}
-                            </Alert>
-                        )}
-
-                        <Button 
-                            type="submit" 
-                            color="violet"
-                            disabled={submitting || !captchaToken}
-                            leftSection={submitting ? <Loader size="xs" /> : '📧'}
-                        >
-                            {submitting ? 'Subscribing...' : 'Subscribe'}
-                        </Button>
-                    </Stack>
-                </form>
-            </Card>
-            */}
+            </> }
         </div>
     );
 }

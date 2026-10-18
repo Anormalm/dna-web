@@ -16,6 +16,7 @@ import {
     UnstyledButton,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
+import { VersionProvider, useVersion } from '@/contexts/VersionContext';
 import { DataProvider } from '@/contexts/DataContext';
 import { routes } from '@/routes';
 
@@ -34,6 +35,7 @@ const NAV_ITEMS = [
 ];
 
 function Layout() {
+    const {version} = useVersion();
     const location = useLocation();
     const pathname = location.pathname;
     const [opened, { toggle, close }] = useDisclosure(false);
@@ -49,7 +51,7 @@ function Layout() {
                 <NavLink
                     key={path}
                     component={Link}
-                    to={path}
+                    to={version === 'v2' ? `${path}?version=v2` : path}
                     label={label}
                     active={pathname === path}
                     onClick={close}
@@ -74,7 +76,7 @@ function Layout() {
                 <Group justify="space-between" h="100%" px="md" wrap="nowrap">
                     <Anchor
                         component={Link}
-                        to="/"
+                        to={version === 'v2' ? '/?version=v2' : '/'}
                         size="lg"
                         fw={700}
                         style={{ textDecoration: 'none' }}
@@ -95,7 +97,7 @@ function Layout() {
                                 <UnstyledButton
                                     key={path}
                                     component={Link}
-                                    to={path}
+                                    to={version === 'v2' ? `${path}?version=v2` : path}
                                     className="header-nav-link"
                                     data-active={active || undefined}
                                     style={{
@@ -140,15 +142,13 @@ function Layout() {
 
 const router = createBrowserRouter([
     {
-        element: <Layout />,
+        element: <VersionProvider><DataProvider><Layout /></DataProvider></VersionProvider>,
         children: routes,
     },
 ]);
 
 export default function App() {
     return (
-        <DataProvider>
-            <RouterProvider router={router} />
-        </DataProvider>
+        <RouterProvider router={router} />
     );
 }

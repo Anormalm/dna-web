@@ -17,6 +17,8 @@ import {
     Tabs,
 } from '@mantine/core';
 import { useDebouncedValue, useResizeObserver, useMediaQuery } from '@mantine/hooks';
+import { VersionSelector } from '@/components/VersionSelector';
+import { useVersion } from '@/contexts/VersionContext';
 import { useData, type DnaMode } from '@/contexts/DataContext';
 import type { ModelData } from '@/utils/data';
 import config from '@/config';
@@ -206,6 +208,7 @@ function Sidebar({
 
 // Main Galaxy Page
 export default function GalaxyPage() {
+    const {version}=useVersion();
     const [galaxyMode, setGalaxyMode] = useState<DnaMode>('raw');
     const dataLoader = useData(galaxyMode);
     const [containerRef, containerRect] = useResizeObserver();
@@ -246,13 +249,13 @@ export default function GalaxyPage() {
     }, [models]);
 
     // Initialize activeOrgs on first load and when switching tabs
-    const prevModeRef = useRef<DnaMode | null>(null);
+    const prevModeRef = useRef<string | null>(null);
     useEffect(() => {
-        if (organizations.length > 0 && prevModeRef.current !== galaxyMode) {
-            prevModeRef.current = galaxyMode;
+        if (organizations.length > 0 && prevModeRef.current !== `${version}-${galaxyMode}`) {
+            prevModeRef.current = `${version}-${galaxyMode}`;
             setActiveOrgs(new Set(organizations.map(o => o.name)));
         }
-    }, [organizations, galaxyMode]);
+    }, [organizations, galaxyMode, version]);
 
     // Organization toggle handlers
     const toggleOrg = useCallback((org: string) => {
@@ -308,7 +311,7 @@ export default function GalaxyPage() {
     // D3 Visualization
     useEffect(() => {
         const container = containerRef.current;
-        const svg = d3.select(svgRef.current);
+        const svg = d3.select(svgRef.current!);
         const tooltip = tooltipRef.current;
 
         if (!container || !svg.node() || !tooltip) return;
@@ -320,7 +323,7 @@ export default function GalaxyPage() {
             hullTension: HULL_TENSION,
             hullFillOpacity: HULL_FILL_OPACITY,
             hullStrokeOpacity: HULL_STROKE_OPACITY,
-        } = getVizConfig(galaxyMode);
+        } = getVizConfig(version === 'v2' ? 'raw' : galaxyMode);
 
         // Use ResizeObserver dimensions for responsive sizing
         const width = containerWidth || container.clientWidth;
@@ -588,7 +591,9 @@ export default function GalaxyPage() {
 
                 for (const boundary of boundaries) {
                     if (boundary.length < 3) continue;
-                    const padded = padHull(boundary, HULL_PADDING);
+                    // MDS coordinates have a much smaller scale than the legacy projection.
+                    const padding = version === 'v2' ? 12 * Math.max(xSpan / Math.max(1, chartWidth - 2 * innerPadding), ySpan / Math.max(1, chartHeight - 2 * innerPadding)) : HULL_PADDING;
+                    const padded = padHull(boundary, padding);
                     const area = Math.abs(d3.polygonArea(padded));
                     hullItems.push({ org, orgModels, cluster, color, padded, area });
                 }
@@ -620,7 +625,7 @@ export default function GalaxyPage() {
 
         // Draw dots
         let visible = 0;
-        const dots = dotGroup.selectAll('.model-dot')
+        dotGroup.selectAll('.model-dot')
             .data(models)
             .enter().append('circle')
             .attr('class', 'model-dot')
@@ -703,11 +708,11 @@ export default function GalaxyPage() {
         return () => {
             document.removeEventListener('keydown', handleKeydown);
         };
-    }, [models, activeOrgs, filterModel, containerWidth, containerHeight, showModelText, galaxyMode]);
+    }, [models, activeOrgs, filterModel, containerWidth, containerHeight, showModelText, galaxyMode, version]);
 
     // Update visibility when filters change
     useEffect(() => {
-        const svg = d3.select(svgRef.current);
+        const svg = d3.select(svgRef.current!);
         let visible = 0;
 
         svg.selectAll('.model-dot')
@@ -770,7 +775,8 @@ export default function GalaxyPage() {
                     flexDirection: 'column',
                 }}
             >
-                <Tabs
+                <div style={{padding: "12px 16px 0"}}><VersionSelector />{version==='v2' && <Text size="xs" c="dimmed" mb="xs">{models.length} enrolled checkpoints · RBF fingerprint geometry · first enrollment setting</Text>}</div>
+                {version==='v1' && <Tabs
                     value={galaxyMode}
                     onChange={(v) => setGalaxyMode((v as DnaMode) || 'raw')}
                     className="galaxy-mode-tabs"
@@ -784,7 +790,7 @@ export default function GalaxyPage() {
                             Chat DNA
                         </Tabs.Tab>
                     </Tabs.List>
-                </Tabs>
+                </Tabs>}
                 <div
                     ref={containerRef}
                     style={{

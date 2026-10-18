@@ -1,15 +1,6 @@
 {
   "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "types": [
-      "vite/client",
-      "node"
-    ],
-    "noUnusedLocals": false,
-    "noUnusedParameters": false
-  },
-  "include": [
-    "server"
-  ],
+  "compilerOptions": { "types": ["vite/client", "node"], "noUnusedLocals": false, "noUnusedParameters": false },
+  "include": ["src", "server"],
   "references": []
 }

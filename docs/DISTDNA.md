@@ -1,8 +1,20 @@
-# DistDNA backend
+# DistDNA in the existing explorer
 
 The versioned API identifies an enrolled checkpoint from repeated, prompt-conditional
 response embeddings. It supports Linear and exact RBF nearest-reference scoring,
 with version-separated Community Lab requests. Existing v1 routes remain available.
+
+## Existing pages
+
+Use the v1/v2 selector within Galaxy, Community Lab, Workbench and About.
+`?version=v2` survives navigation; v1 remains the default. Raw/chat controls remain
+available in v1; v2 currently displays the separately enrolled raw gallery.
+Workbench provides saved queries and compatible encoded-query uploads, with
+Linear or RBF nearest-reference scores. It states the closed-set assumption.
+
+For a local frontend and API together, run `npm run dev:all` and open
+`http://localhost:5173/workbench?version=v2`. For separate ports use `PORT=3002`
+on the backend and `API_PROXY_TARGET=http://localhost:3002` on Vite.
 
 ## Run
 
