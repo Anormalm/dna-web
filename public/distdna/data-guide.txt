@@ -1,0 +1,27 @@
+DistDNA v2 query upload
+
+Use the Workbench v2 selector, choose a saved query, or upload a JSON bank.
+POST /api/v2/identify accepts {method: "rbf" | "linear", queryId, queries?}.
+Without queries, queryId selects an independently collected server example.
+
+Query bank schema:
+{"schema":"distdna.queries.v1","title":"My queries","protocol":{...},
+ "queries":[{"id":"my-query","samples":[[[... embedding coordinates ...]]]}]}
+
+samples axes: ordered prompt, independent response, embedding coordinate.
+GET /api/v2/catalog returns the exact protocol to use. Match encoder revision,
+ordered prompt IDs and prompt digest, preprocessing, normalization, and frozen
+sigmaSquared/calibration. These metadata are validated server-side; copied
+metadata alone does not verify that a client collected the data correctly.
+Use independent query response draws. Query IDs must not overlap enrollment.
+The current collection uses 20 shared prompts, four responses per prompt and
+768-dimensional BGE embeddings. Limit: 16 MB per upload.
+
+The API does not generate text or embed raw text. It scores already-encoded
+response banks. It returns the closest enrolled candidates, per-prompt squared
+distances, closest reference IDs and the gap between the first two candidates.
+Distances are not probabilities. Unenrolled identities are not rejected.
+
+Enrollment is configured by the operator using DISTDNA_DATA_DIR. Public requests
+cannot change enrollment, calibration or files on the server. Scoring takes
+place in a bounded server worker; uploaded queries are not written to disk.

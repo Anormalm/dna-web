@@ -5,6 +5,13 @@
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](https://choosealicense.com/licenses/mit/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
 
+## DistDNA v2 backend
+
+A versioned backend adds Linear/RBF nearest-reference identification and separates
+v1/v2 Community Lab proposals. Run `npm ci && npm run server`; a four-checkpoint
+example bank is included. Larger compatible banks use `DISTDNA_DATA_DIR`.
+See [API, protocol and validation](docs/DISTDNA.md).
+
 ## 🌟 Overview
 
 LLM DNA Explorer is an interactive web application that visualizes the "DNA" (behavioral fingerprints) of Large Language Models. Using the **RepTrace** methodology, we extract unique signatures from model responses and project them into a navigable 2D space—the **DNA Galaxy**.

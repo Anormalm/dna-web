@@ -2,9 +2,11 @@
  * Express Server - Main entry point for the Lab API
  */
 import express from 'express';
+import { createDistDnaRouter } from './distdna/router.js';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
-import { initDatabase, getDatabase } from './database.js';
+import { initDatabase } from './database.js';
+import proposalsRouter from './services/proposals.js';
 import submissionRouter from './services/submission.js';
 import verificationRouter from './services/verification.js';
 // import subscribeRouter from './services/subscribe.js';
@@ -12,7 +14,7 @@ import { startCleanupJob } from './cron/cleanup.js';
 import config from '../config.json' with { type: 'json' };
 
 const app = express();
-const PORT = config.server?.port || 3001;
+const PORT = Number(process.env.PORT) || config.server?.port || 3001;
 
 // Middleware
 app.use(cors({
@@ -20,7 +22,7 @@ app.use(cors({
     credentials: true
 }));
 
-app.use(express.json());
+
 
 // Rate limiting
 const limiter = rateLimit({
@@ -29,28 +31,16 @@ const limiter = rateLimit({
     message: { error: 'Too many requests, please try again later' }
 });
 app.use('/api', limiter);
+const distdna = createDistDnaRouter();
+app.use('/api/v2', distdna.router);
+app.use(express.json());
 
 // Routes
 app.use('/api', submissionRouter);
 app.use('/api', verificationRouter);
 // app.use('/api', subscribeRouter); // TEMPORARILY DISABLED
 
-// GET /api/proposals - Fetch all active proposals
-app.get('/api/proposals', async (req, res) => {
-    try {
-        const db = await getDatabase();
-        const proposals = await db.all(
-            `SELECT id, model_id as modelId, submitter_email as submitter, 
-                    reason, votes, status, created_at as createdAt
-             FROM proposals 
-             ORDER BY votes DESC, created_at DESC`
-        );
-        res.json(proposals);
-    } catch (error) {
-        console.error('Error fetching proposals:', error);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
+app.use('/api', proposalsRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {

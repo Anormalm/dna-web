@@ -13,6 +13,7 @@ interface ProposalPayload {
     modelId: string;
     reason?: string;
     mode?: 'raw' | 'chat';
+    version?: 'v1' | 'v2';
 }
 
 interface BatchVotePayload {
@@ -88,9 +89,9 @@ router.get('/verify', async (req: Request, res: Response) => {
                 const proposalId = uuidv4();
                 const mode = payload.mode || 'raw';
                 await db.run(
-                    `INSERT INTO proposals (id, model_id, submitter_email, reason, votes, mode)
-                     VALUES (?, ?, ?, ?, 1, ?)`,
-                    [proposalId, payload.modelId, submission.email, payload.reason || '', mode]
+                    `INSERT INTO proposals (id, model_id, submitter_email, reason, votes, mode, version)
+                     VALUES (?, ?, ?, ?, 1, ?, ?)`,
+                    [proposalId, payload.modelId, submission.email, payload.reason || '', mode, payload.version === 'v2' ? 'v2' : 'v1']
                 );
 
                 // Also record the submitter's vote
