@@ -7,7 +7,7 @@ import { existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 
-const DB_PATH = './server/data/lab.db';
+const DB_PATH = process.env.LAB_DB_PATH || './server/data/lab.db';
 
 let db: Database | null = null;
 
@@ -27,6 +27,7 @@ interface ProposalPayload {
     modelId: string;
     reason?: string;
     mode?: 'raw' | 'chat';
+    version?: 'v1' | 'v2';
 }
 
 function normalizeMode(mode?: string): 'raw' | 'chat' {
@@ -42,6 +43,9 @@ async function ensureProposalsModeColumn(database: Database): Promise<void> {
         console.log('🔧 Migrated proposals table: added mode column');
     }
 
+    if (!columns.some(col => col.name === 'version')) {
+        await database.run("ALTER TABLE proposals ADD COLUMN version TEXT NOT NULL DEFAULT 'v1'");
+    }
     await database.run(
         `UPDATE proposals
          SET mode = 'raw'
@@ -78,8 +82,8 @@ async function recoverVerifiedProposalSubmissions(database: Database): Promise<v
         if (!modelId) continue;
 
         const existingProposal = await database.get<{ id: string }>(
-            `SELECT id FROM proposals WHERE lower(model_id) = lower(?)`,
-            [modelId]
+            `SELECT id FROM proposals WHERE lower(model_id) = lower(?) AND version = ? AND mode = ?`,
+            [modelId, payload.version === 'v2' ? 'v2' : 'v1', normalizeMode(payload.mode)]
         );
         if (existingProposal) {
             continue;
@@ -89,9 +93,9 @@ async function recoverVerifiedProposalSubmissions(database: Database): Promise<v
         const mode = normalizeMode(payload.mode);
 
         await database.run(
-            `INSERT INTO proposals (id, model_id, submitter_email, reason, votes, status, mode, created_at)
-             VALUES (?, ?, ?, ?, 1, 'pending', ?, ?)`,
-            [proposalId, modelId, row.email, payload.reason || '', mode, row.created_at]
+            `INSERT INTO proposals (id, model_id, submitter_email, reason, votes, status, mode, version, created_at)
+             VALUES (?, ?, ?, ?, 1, 'pending', ?, ?, ?)`,
+            [proposalId, modelId, row.email, payload.reason || '', mode, payload.version === 'v2' ? 'v2' : 'v1', row.created_at]
         );
 
         await database.run(

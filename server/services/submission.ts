@@ -8,6 +8,7 @@ import { sendVerificationEmail, EmailType, SubmissionDetails } from './email.js'
 import { config } from 'dotenv';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
+import { readCatalog } from '../distdna/repository.js';
 
 // Load environment variables from server/.env
 config({ path: 'server/.env' });
@@ -64,6 +65,7 @@ interface ProposalPayload {
     modelId: string;
     reason?: string;
     mode?: 'raw' | 'chat';
+    version?: 'v1' | 'v2';
 }
 
 interface BatchVotePayload {
@@ -138,12 +140,21 @@ router.post('/submit', async (req: Request, res: Response) => {
 
         // Type-specific validation
         if (payload.type === 'proposal') {
-            if (!payload.modelId) {
+            if (typeof payload.modelId !== 'string' || !payload.modelId.trim()) {
                 return res.status(400).json({ error: 'Model ID is required' });
             }
 
-            // Check if model is already in the DNA database (evaluated)
-            if (isModelEvaluated(payload.modelId)) {
+            if (payload.version !== undefined && !['v1','v2'].includes(payload.version)) return res.status(400).json({error:'Invalid DNA version.'});
+            if (payload.mode !== undefined && !['raw','chat'].includes(payload.mode)) return res.status(400).json({error:'Invalid collection mode.'});
+            payload.version ||= 'v1'; payload.mode ||= 'raw'; payload.modelId = payload.modelId.trim();
+            if (payload.version === 'v2' && payload.mode !== 'raw') return res.status(400).json({error:'The current DistDNA collection uses raw prompts.'});
+            let alreadyEvaluated: boolean;
+            if (payload.version === 'v2') {
+                try { alreadyEvaluated=readCatalog().models.some((m:{id:string})=>m.id.toLowerCase()===payload.modelId.toLowerCase()); }
+                catch { return res.status(503).json({error:'DistDNA enrollment catalog unavailable.'}); }
+            } else { alreadyEvaluated=isModelEvaluated(payload.modelId); }
+            // Check the selected version's enrollment gallery.
+            if (alreadyEvaluated) {
                 return res.status(409).json({
                     error: 'This model has already been evaluated and is in the Galaxy!'
                 });
@@ -151,8 +162,8 @@ router.post('/submit', async (req: Request, res: Response) => {
 
             // Check if model already proposed (in proposals table)
             const existing = await db.get(
-                'SELECT id FROM proposals WHERE model_id = ?',
-                [payload.modelId]
+                'SELECT id FROM proposals WHERE lower(model_id) = lower(?) AND version = ? AND mode = ?',
+                [payload.modelId,payload.version,payload.mode]
             );
             if (existing) {
                 return res.status(409).json({ error: 'This model has already been proposed' });
@@ -161,9 +172,11 @@ router.post('/submit', async (req: Request, res: Response) => {
             // Check if model is pending verification (in submission_queue)
             const pending = await db.get(
                 `SELECT id FROM submission_queue 
-                 WHERE json_extract(payload, '$.modelId') = ? 
+                 WHERE lower(json_extract(payload, '$.modelId')) = lower(?)
+                 AND COALESCE(json_extract(payload, '$.version'), 'v1') = ?
+                 AND COALESCE(json_extract(payload, '$.mode'), 'raw') = ?
                  AND is_verified = 0`,
-                [payload.modelId]
+                [payload.modelId,payload.version,payload.mode]
             );
             if (pending) {
                 return res.status(409).json({ error: 'This model is pending verification by another user' });

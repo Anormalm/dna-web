@@ -11,7 +11,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "build:data": "node scripts/build_database.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:distdna": "vitest run test/distdna.test.ts test/distdna-api.test.ts test/distdna-lab.test.ts test/distdna-binary.test.ts",
+    "typecheck:distdna": "tsc --project tsconfig.distdna.json"
   },
   "dependencies": {
     "@mantine/core": "^8.3.13",
@@ -31,7 +33,8 @@
     "sqlite3": "^5.1.7",
     "tsne-js": "^1.0.3",
     "umap-js": "^1.4.0",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "tsx": "^4.7.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
@@ -50,7 +53,6 @@
     "postcss": "^8.4.33",
     "supertest": "^6.3.4",
     "tailwindcss": "^3.4.1",
-    "tsx": "^4.7.0",
     "typescript": "^5.3.3",
     "vite": "^7.3.1",
     "vitest": "^4.0.18"

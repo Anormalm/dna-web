@@ -1,12 +1,15 @@
 # Dependencies
 node_modules/
 .pnpm-store/
+__pycache__/
+*.pyc
 
 # Build outputs
 dist/
 *.tsbuildinfo
 
 # Environment files
+openrouter.env
 .env
 server/.env
 
