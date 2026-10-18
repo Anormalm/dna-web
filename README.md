@@ -5,12 +5,14 @@
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](https://choosealicense.com/licenses/mit/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
 
-## DistDNA v2 backend
+## DistDNA v2 preview
 
-A versioned backend adds Linear/RBF nearest-reference identification and separates
-v1/v2 Community Lab proposals. Run `npm ci && npm run server`; a four-checkpoint
-example bank is included. Larger compatible banks use `DISTDNA_DATA_DIR`.
-See [API, protocol and validation](docs/DISTDNA.md).
+Galaxy, Community Lab, Workbench and About each have a v1/v2 selector inside the
+existing page. Run `npm ci && npm run dev:all` and open
+`http://localhost:5173/workbench?version=v2`.
+
+The included dataset contains four real checkpoint entries. Use `DISTDNA_DATA_DIR`
+for a compatible larger bank. See [API, protocol and validation](docs/DISTDNA.md).
 
 ## 🌟 Overview
 

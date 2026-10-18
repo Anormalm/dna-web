@@ -24,6 +24,9 @@ import {
     Modal,
     Tabs,
 } from '@mantine/core';
+import { VersionSelector } from '@/components/VersionSelector';
+import { useVersion } from '@/contexts/VersionContext';
+import { DistDnaWorkbench } from '@/distdna/Workbench';
 import { useData, useDualData, type DnaMode } from '@/contexts/DataContext';
 import type { ModelData, RankedModel } from '@/utils/data';
 
@@ -604,6 +607,7 @@ function WorkbenchContent({ mode }: WorkbenchContentProps) {
 
 // Main Workbench Page with Mode Tabs
 export default function WorkbenchPage() {
+    const {version}=useVersion();
     const { chatAvailable } = useDualData();
     const [workbenchMode, setWorkbenchMode] = useState<DnaMode>('raw');
 
@@ -613,16 +617,17 @@ export default function WorkbenchPage() {
                 <div className="workbench-header-inner">
                     <h1 className="page-title">Workbench</h1>
                     <Badge size="sm" variant="light" color="violet" className="workbench-badge">
-                        DNA Comparison
+                        {version==='v2'?'Checkpoint Identification':'DNA Comparison'}
                     </Badge>
                 </div>
                 <p className="page-subtitle">
-                    Select a reference model and run similarity analysis against the catalog. Optionally narrow by comparison set.
+                    {version==='v2'?'Identify a query against enrolled checkpoints using repeated responses to shared prompts.':'Select a reference model and run similarity analysis against the catalog. Optionally narrow by comparison set.'}
                 </p>
             </header>
 
+            <VersionSelector />
             {/* Mode Tabs */}
-            <Tabs
+            {version==='v1' && <Tabs
                 value={workbenchMode}
                 onChange={(v) => setWorkbenchMode((v as DnaMode) || 'raw')}
                 mb="lg"
@@ -635,10 +640,10 @@ export default function WorkbenchPage() {
                         Chat DNA
                     </Tabs.Tab>
                 </Tabs.List>
-            </Tabs>
+            </Tabs>}
 
             {/* Workbench Content for selected mode */}
-            <WorkbenchContent mode={workbenchMode} />
+            {version==='v2' ? <DistDnaWorkbench /> : <WorkbenchContent mode={workbenchMode} />}
         </div>
     );
 }

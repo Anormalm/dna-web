@@ -9,7 +9,8 @@ import {
     type ReactNode,
 } from 'react';
 import { DataLoader } from '@/utils/data';
-import { Center, Stack, Loader, Text, Paper } from '@mantine/core';
+import { useVersion } from './VersionContext';
+import { Center, Stack, Loader, Text, Paper, Button } from '@mantine/core';
 
 // Types for dual data context
 export type DnaMode = 'raw' | 'chat';
@@ -24,6 +25,17 @@ interface DualDataContextType {
 const DualDataContext = createContext<DualDataContextType | null>(null);
 
 export function DataProvider({ children }: { children: ReactNode }) {
+    const {version}=useVersion();
+    const [v2Loader,setV2Loader]=useState<DataLoader|null>(null);
+    const [v2Error,setV2Error]=useState('');
+    const [attempt,setAttempt]=useState(0);
+    useEffect(()=>{
+        if(version!=='v2'||v2Loader)return;
+        let active=true;setV2Error('');
+        const loader=new DataLoader('/api/v2/catalog');
+        loader.loadDatabase().then(()=>{if(!active)return;if(loader.isLoaded)setV2Loader(loader);else setV2Error('The DistDNA backend is unavailable. Start the API server and retry.');});
+        return ()=>{active=false;};
+    },[version,v2Loader,attempt]);
     const [rawLoader] = useState(() => new DataLoader('/dna_database.json'));
     const [chatLoader] = useState(() => new DataLoader('/dna_database_chat.json'));
     const [ready, setReady] = useState(false);
@@ -42,7 +54,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         });
     }, [rawLoader, chatLoader]);
 
-    if (!ready) {
+    if (version==='v2' && !v2Loader) return <Center mih="65vh"><Stack align="center"><Text>{v2Error || 'Loading DistDNA gallery…'}</Text>{v2Error ? <GroupFallback retry={()=>setAttempt(x=>x+1)} /> : <Loader />}</Stack></Center>;
+    if (version==='v1' && !ready) {
         return (
             <Center h="100vh" bg="gray.0">
                 <Paper p="xl" radius="lg" shadow="lg" withBorder>
@@ -61,7 +74,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
 
     return (
-        <DualDataContext.Provider value={{ rawLoader, chatLoader, isReady: ready, chatAvailable }}>
+        <DualDataContext.Provider value={{ rawLoader: version==='v2' ? v2Loader! : rawLoader, chatLoader: version==='v2' ? v2Loader! : chatLoader, isReady: version==='v2' ? !!v2Loader : ready, chatAvailable: version==='v1' && chatAvailable }}>
             {children}
         </DualDataContext.Provider>
     );
@@ -88,3 +101,5 @@ export function useDualData(): DualDataContextType {
     }
     return ctx;
 }
+
+function GroupFallback({retry}:{retry:()=>void}){const {setVersion}=useVersion();return <Stack><Button onClick={retry}>Retry</Button><Button variant="subtle" onClick={()=>setVersion('v1')}>Use v1</Button></Stack>;}

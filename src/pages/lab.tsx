@@ -22,6 +22,8 @@ import {
     Tabs,
 } from '@mantine/core';
 import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile';
+import { VersionSelector } from '@/components/VersionSelector';
+import { useVersion } from '@/contexts/VersionContext';
 import { useData, type DnaMode } from '@/contexts/DataContext';
 import { VoteModal } from '@/components/VoteModal';
 
@@ -150,6 +152,7 @@ interface LabContentProps {
 }
 
 function LabContent({ mode }: LabContentProps) {
+    const {version}=useVersion();
     const dataLoader = useData(mode);
 
     // Form state
@@ -168,7 +171,7 @@ function LabContent({ mode }: LabContentProps) {
     const [activeTab, setActiveTab] = useState<string>('open');
 
     // Batch voting state (persisted in sessionStorage, separated by mode)
-    const storageKey = `lab-pending-votes-${mode}`;
+    const storageKey = `lab-pending-votes-${version}-${mode}`;
     const [pendingVotes, setPendingVotes] = useState<Set<string>>(() => {
         try {
             const stored = sessionStorage.getItem(storageKey);
@@ -187,7 +190,7 @@ function LabContent({ mode }: LabContentProps) {
     // Fetch proposals from API (legacy endpoint)
     const fetchProposals = useCallback(async () => {
         try {
-            const response = await fetch('/api/proposals');
+            const response = await fetch(`/api/proposals?version=${version}&mode=${mode}`);
             if (response.ok) {
                 const data = await response.json();
                 setProposals(data);
@@ -197,7 +200,7 @@ function LabContent({ mode }: LabContentProps) {
         } finally {
             setLoading(false);
         }
-    }, [mode]);
+    }, [mode,version]);
 
     useEffect(() => {
         setLoading(true);
@@ -356,7 +359,7 @@ function LabContent({ mode }: LabContentProps) {
                         type: 'proposal',
                         modelId: modelId.trim(),
                         reason: reason.trim(),
-                        mode: mode // Include mode in proposal
+                        mode: mode, version // Enrollment queue namespace
                     }
                 })
             });
@@ -395,14 +398,14 @@ function LabContent({ mode }: LabContentProps) {
         fetchProposals(); // Refresh list
     }, [fetchProposals]);
 
-    const modeLabel = mode === 'chat' ? 'Chat' : 'Raw';
+    const modeLabel = version==='v2' ? 'DistDNA v2' : mode === 'chat' ? 'Chat' : 'Raw';
 
     return (
         <>
             <div className="lab-main-grid">
                 {/* Proposal Form */}
                 <Paper p="lg" radius="md" withBorder>
-                    <Title order={4} mb="lg">🔬 Propose a Model ({modeLabel} DNA)</Title>
+                    <Title order={4} mb="lg">🔬 Propose a Model ({modeLabel}{version==='v1'?' DNA':''})</Title>
 
                     <form onSubmit={handleSubmit}>
                         <Stack gap="md">
@@ -607,6 +610,7 @@ function LabContent({ mode }: LabContentProps) {
 
 // Main Lab Page (Raw DNA only)
 export default function LabPage() {
+    const {version}=useVersion();
     return (
         <div className="page lab-page">
             <header className="page-header">
@@ -617,7 +621,8 @@ export default function LabPage() {
             </header>
 
             {/* Lab Content for raw mode */}
-            <LabContent mode="raw" />
+            <VersionSelector />
+            <LabContent key={version} mode="raw" />
 
             {/* How It Works */}
             <Paper p="lg" radius="md" withBorder mt="xl" className="lab-how-it-works-paper">
@@ -636,7 +641,7 @@ export default function LabPage() {
                     <InfoCard
                         icon="3️⃣"
                         title="Track"
-                        description="Watch as we process top-voted models with RepTrace."
+                        description={version==='v2'?'Track repeated-response enrollment for DistDNA.':'Watch as we process top-voted models with RepTrace.'}
                     />
                     <InfoCard
                         icon="4️⃣"
