@@ -10,6 +10,7 @@ dist/
 
 # Environment files
 openrouter.env
+huggingface.env
 .env
 server/.env
 
