@@ -20,7 +20,7 @@ import subprocess
 import sys
 import time
 import urllib.request
-from common import cached_snapshot, read, sha, write
+from common import cached_snapshot, read, sha, verify_run, write
 from launch import availability
 from provider_config import openrouter_key
 from hf_access import refresh as refresh_hf_access
@@ -194,11 +194,12 @@ def download_model(name, item, staging):
 
 
 def release_owned_staging(spec, db, active):
-    """Release completed downloads only when needed; shared caches are never touched."""
+    """Delete owned weights after verified success; keep caches and retry inputs."""
     root = Path(spec['staging']).resolve()
-    if not root.exists() or shutil.disk_usage(root).free > (spec['diskReserveGiB']+512)*GIB:
-        return
-    rows = db.execute("SELECT * FROM jobs WHERE state IN ('complete','failed') ORDER BY updated").fetchall()
+    released = []
+    if not root.exists():
+        return released
+    rows = db.execute("SELECT * FROM jobs WHERE mode='raw' AND state='complete' ORDER BY updated").fetchall()
     for row in rows:
         if row['key'] in active or not row['item'] or not row['run']:
             continue
@@ -206,17 +207,44 @@ def release_owned_staging(spec, db, active):
         if not item.get('owned') or not item.get('snapshot'):
             continue
         target = Path(item['snapshot'])
-        if target.is_symlink() or target.parent.resolve() != root or target.name != row['key']:
+        if (target.is_symlink() or not target.is_dir() or
+                target.parent.resolve() != root or target.name != row['key']):
+            continue
+        job = Path(row['run'])
+        if job.resolve().is_relative_to(target.resolve()) or pid_running(row['pid'], job):
             continue
         marker = target / '.distdna-owned.json'
-        if not marker.is_file() or read(marker) != dict(modelId=row['model'], revision=item['revision']):
+        if not marker.is_file():
             continue
-        if not (Path(row['run']) / 'checkpoint-provenance.json').is_file():
+        try:
+            if read(marker) != dict(modelId=row['model'], revision=item['revision']):
+                continue
+            source = read(job / 'checkpoint-provenance.json')
+            if (source['modelId'], source['revision'], source['snapshot']) != (
+                    row['model'], item['revision'], str(target)):
+                raise ValueError('Checkpoint provenance differs from staged weights')
+            output = job / 'models' / f"{row['idx']:03d}"
+            if read(output / 'status.json').get('status') != 'complete':
+                continue
+            from merge import verified_shards
+            shards = verified_shards(job, verify_run(job))
+            if not any(i['modelId'] == row['model'] and i['revision'] == item['revision']
+                       and folder == output for i, folder, _, _ in shards):
+                raise ValueError('No verified response/embedding shard for this checkpoint')
+            receipt = dict(modelId=row['model'], revision=item['revision'],
+                snapshot=str(target), weightBytes=item.get('weightBytes'),
+                completionSha256=sha(output / 'complete.json'),
+                preserved=['responses', 'embeddings', 'collection manifests', 'checkpoint provenance'])
+            shutil.rmtree(target)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            write(job / 'weights-cleanup.json', dict(status='retained', updated=time.time(), error=str(exc)))
+            update(db, row['key'], detail='Staged weights retained: cleanup verification or removal failed')
             continue
-        shutil.rmtree(target)
-        update(db, row['key'], detail='Own staged weights released after collection; response records and provenance retained')
-        if shutil.disk_usage(root).free > (spec['diskReserveGiB']+512)*GIB:
-            break
+        write(job / 'weights-cleanup.json', dict(receipt, status='deleted', updated=time.time()))
+        update(db, row['key'], detail='Own staged weights deleted after verified completion; responses, embeddings and provenance retained')
+        released.append(receipt)
+        print(f"Released completed checkpoint weights: {row['model']}", flush=True)
+    return released
 
 
 def connection(run):

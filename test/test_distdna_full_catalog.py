@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts/distdna_enrollment'))
-from full_catalog import gpu_count, job_key, model_id, select_files, make_job,json_metadata,cached_native_snapshot
+from full_catalog import gpu_count, job_key, model_id, select_files, make_job,json_metadata,cached_native_snapshot,connection,release_owned_staging
 from common import read, write, sha, verify_run
 from provider_config import openrouter_key
 
@@ -107,6 +107,97 @@ class FullCatalogTests(unittest.TestCase):
             write(job / 'checkpoint-metadata/config.json', {'changed':True})
             with self.assertRaises(ValueError):
                 verify_run(job)
+
+
+class StagingCleanupTests(unittest.TestCase):
+    def setUp(self):
+        import numpy as np
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.db = connection(self.root)
+        self.addCleanup(self.db.close)
+        self.key = job_key('raw', 'example/model')
+        self.stage = self.root / 'staging' / self.key
+        self.stage.mkdir(parents=True)
+        (self.stage / 'model.safetensors').write_bytes(b'owned test weights')
+        self.job = self.root / 'jobs' / self.key
+        output = self.job / 'models/000'
+        output.mkdir(parents=True)
+        item = dict(modelId='example/model', revision='a'*40, snapshot=str(self.stage),
+                    owned=True, weightBytes=18)
+        write(self.stage / '.distdna-owned.json', {k:item[k] for k in ['modelId','revision']})
+        provenance = self.job / 'checkpoint-provenance.json'
+        write(provenance, item)
+        protocol = dict(dimension=2)
+        self.run_spec = dict(models=[item], protocol=protocol, promptIds=['p'],
+            expectedPerModel=800, enrollmentSettings=list(range(8)), validationSettings=list(range(2)),
+            frozenFiles={str(provenance):sha(provenance)})
+        write(self.job / 'run.json', self.run_spec)
+        for name, count in [('enrollment.npy',8), ('queries.npy',2)]:
+            data = np.zeros((count,1,4,2), dtype=np.float32)
+            data[...,0] = 1
+            np.save(output / name, data)
+        (output / 'responses.jsonl').write_text('{}\n'*800)
+        (output / 'preflight.jsonl').write_text('{}\n'*4)
+        write(output / 'generation-config.json', {})
+        names = ['responses.jsonl','preflight.jsonl','enrollment.npy','queries.npy','generation-config.json']
+        write(output / 'complete.json', dict(modelId=item['modelId'],revision=item['revision'],
+            protocol=protocol,runSha256=sha(self.job/'run.json'),responseCount=800,
+            enrollmentSettings=list(range(8)),validationSettings=list(range(2)),
+            sha256={n:sha(output/n) for n in names}))
+        write(output / 'status.json', dict(status='complete'))
+        self.db.execute('INSERT INTO jobs(key,mode,model,state,item,run,idx,updated) VALUES(?,?,?,?,?,?,?,?)',
+            (self.key,'raw',item['modelId'],'complete',json.dumps(item),str(self.job),0,1))
+        self.db.commit()
+        self.queue_spec = dict(staging=str(self.stage.parent), diskReserveGiB=100)
+
+    def test_removes_verified_weights_immediately_and_preserves_replay(self):
+        from merge import verified_shards
+        before = {str(p.relative_to(self.job)):sha(p) for p in self.job.rglob('*') if p.is_file()}
+        released = release_owned_staging(self.queue_spec, self.db, {})
+        self.assertEqual(len(released), 1)
+        self.assertFalse(self.stage.exists())
+        for name, digest in before.items():
+            self.assertEqual(sha(self.job/name), digest)
+        self.assertEqual(len(verified_shards(self.job, verify_run(self.job))), 1)
+        self.assertEqual(read(self.job/'weights-cleanup.json')['status'], 'deleted')
+        self.assertEqual(release_owned_staging(self.queue_spec,self.db,{}), [])
+
+    def test_retains_failed_or_still_running_workers(self):
+        for state, active, alive in [('failed',{},False),('complete',{self.key:object()},False),('complete',{},True)]:
+            with self.subTest(state=state, active=bool(active), alive=alive):
+                self.db.execute('UPDATE jobs SET state=?',(state,));self.db.commit()
+                with patch('full_catalog.pid_running',return_value=alive):
+                    self.assertEqual(release_owned_staging(self.queue_spec,self.db,active), [])
+                self.assertTrue(self.stage.exists())
+
+    def test_retains_weights_when_output_verification_fails(self):
+        output = self.job/'models/000'
+        for filename in ['responses.jsonl','enrollment.npy','complete.json']:
+            with self.subTest(filename=filename):
+                path = output/filename; original = path.read_bytes(); path.unlink()
+                self.assertEqual(release_owned_staging(self.queue_spec,self.db,{}), [])
+                self.assertTrue(self.stage.exists())
+                path.write_bytes(original)
+        (output/'responses.jsonl').write_text('corrupted\n')
+        self.assertEqual(release_owned_staging(self.queue_spec,self.db,{}), [])
+        self.assertTrue(self.stage.exists())
+        self.assertEqual(read(self.job/'weights-cleanup.json')['status'], 'retained')
+
+    def test_retains_unowned_mismatched_and_symlinked_paths(self):
+        item = read(self.job/'checkpoint-provenance.json')
+        self.db.execute('UPDATE jobs SET item=?',(json.dumps(dict(item,owned=False)),));self.db.commit()
+        self.assertEqual(release_owned_staging(self.queue_spec,self.db,{}), [])
+        self.assertTrue(self.stage.exists())
+        self.db.execute('UPDATE jobs SET item=?',(json.dumps(item),));self.db.commit()
+        marker = self.stage/'.distdna-owned.json';original = marker.read_bytes()
+        write(marker,dict(modelId='someone/else',revision='a'*40))
+        self.assertEqual(release_owned_staging(self.queue_spec,self.db,{}), [])
+        self.assertTrue(self.stage.exists());marker.write_bytes(original)
+        other = self.root/'shared-cache';self.stage.rename(other);self.stage.symlink_to(other,target_is_directory=True)
+        self.assertEqual(release_owned_staging(self.queue_spec,self.db,{}), [])
+        self.assertTrue((other/'model.safetensors').exists())
 
 
 if __name__ == '__main__':

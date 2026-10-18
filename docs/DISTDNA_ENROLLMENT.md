@@ -33,9 +33,13 @@ Use `start --research ... --base ... --collection ... --raw ... --chat ...
 --cache ... --cache ... --inherit ... --output ... --staging ...`, then `resume
 --run ...` after an interruption. `status --run ...` reports progress; the SQLite
 queue and `inventory.json` retain unavailable, gated, unsupported, and failed
-entries with reasons. Existing shared caches are read-only. Under storage
-pressure, the controller can release only its own completed staging downloads;
-collected responses and copied checkpoint provenance remain intact.
+entries with reasons. Existing shared caches are read-only. After each successful
+run, the controller verifies response and embedding checksums, array shapes and
+normalization, frozen inputs and checkpoint provenance, and waits for the worker
+to exit. It then deletes that run's owned staging downloads immediately, regardless
+of free disk space. Responses, embeddings and copied checkpoint provenance remain
+intact, with a `weights-cleanup.json` receipt. Failed or incomplete runs keep their
+weights for retries; paths outside the owned staging directory are never removed.
 
 Configure the API provider in `<run>/openrouter.env`, with permissions `600`:
 
