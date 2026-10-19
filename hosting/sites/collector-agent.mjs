@@ -19,7 +19,7 @@ if (process.argv.includes('--daemon')) {
 const origin = new URL(configuration.origin).origin;
 if (!origin.endsWith('.chatgpt.site') || !origin.startsWith('https://')) throw new Error('Invalid hosted origin');
 const auth = { 'OAI-Sites-Authorization': 'Bearer ' + configuration.token, 'X-DNA-Bridge-Key': configuration.token, 'Content-Type': 'application/json' };
-const allowed = new Set(['GET /api/admin/session','GET /api/admin/github/start','GET /api/admin/github/callback','GET /api/admin/snapshot','POST /api/admin/logout','GET /api/v2/catalog','GET /api/v2/health','POST /api/v2/identify']);
+const allowed = new Set(['GET /api/admin/session','GET /api/admin/github/start','GET /api/admin/github/callback','GET /api/admin/snapshot', 'GET /api/admin/controls', 'POST /api/admin/estimate', 'POST /api/admin/jobs', 'POST /api/admin/job-action', 'POST /api/admin/budget', 'POST /api/admin/collection-action','POST /api/admin/logout','GET /api/v2/catalog','GET /api/v2/health','POST /api/v2/identify']);
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 let stopping = false;
 process.on('SIGTERM', () => { stopping = true; });

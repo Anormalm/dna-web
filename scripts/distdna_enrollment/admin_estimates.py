@@ -32,7 +32,7 @@ def summarize_samples(values):
     n=len(values)
     return dict(low=values[max(0,int((n-1)*.2))]*.75,high=values[min(n-1,math.ceil((n-1)*.8))]*1.5,samples=n)
 
-def raw_time(run,parameters,gpus):
+def raw_time(run,parameters,gpus,weight_bytes):
     values=[]
     # Completed runs include loading, generation and encoding; queue/download time is separate.
     with connection(run) as db:
@@ -40,7 +40,9 @@ def raw_time(run,parameters,gpus):
     for row in rows:
         try:
             item=json.loads(row['item']); p=item.get('parameters')
-            if parameters and p and not .5<=p/parameters<=2:continue
+            if parameters and p:
+                if not .5<=p/parameters<=2:continue
+            elif not item.get('weightBytes') or not .5<=item['weightBytes']/weight_bytes<=2:continue
             if item.get('gpuCount')!=gpus:continue
             status=read(Path(row['run'])/'models'/f"{row['idx']:03d}"/'status.json')
             values.append(status['elapsedSeconds']/3600)
@@ -70,7 +72,7 @@ def estimate(run,request):
         token=hf_token(run)
         if token:os.environ['HF_TOKEN']=token
         item=json.loads(existing['item']) if existing and existing['item'] else inspect_model(model,spec['caches'],run/'metadata',spec.get('nativeRuntimes'))
-        size=item['weightBytes'];gpus=item['gpuCount'];duration=raw_time(run,item.get('parameters'),gpus)
+        size=item['weightBytes'];gpus=item['gpuCount'];duration=raw_time(run,item.get('parameters'),gpus,size)
         staged=item.get('snapshot') and Path(item['snapshot']).exists()
         free=shutil.disk_usage(spec['staging']).free
         public.update(revision=item['revision'],parameters=item.get('parameters'),weightBytes=size,gpuCount=gpus,

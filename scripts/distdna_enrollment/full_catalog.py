@@ -534,7 +534,8 @@ def run_queue(run):
                 inspection[future] = row['key']
             ready = db.execute("SELECT * FROM jobs WHERE state='ready' AND mode='raw'").fetchall()
             discovered = db.execute("SELECT * FROM jobs WHERE state='discovered' AND retry_after<=? ORDER BY updated",(time.time(),)).fetchall()
-            discovered.sort(key=lambda r: json.loads(r['item'])['weightBytes'])
+            requested = {r[0] for r in db.execute("SELECT key FROM admin_job_intents WHERE desired='run'")}
+            discovered.sort(key=lambda r: (r['key'] not in requested, json.loads(r['item'])['weightBytes']))
             Path(spec['staging']).mkdir(parents=True, exist_ok=True)
             release_owned_staging(spec, db, active)
             reserve = spec['diskReserveGiB']*GIB + sum(json.loads(db.execute('SELECT item FROM jobs WHERE key=?',(k,)).fetchone()[0])['weightBytes'] for k in downloads.values())
@@ -551,7 +552,7 @@ def run_queue(run):
             av = availability()
             for gpu, available in av.items():
                 idle[gpu] = idle.get(gpu, 0)+1 if available else 0
-            ready.sort(key=lambda r: (r['attempts'], r['updated']))
+            ready.sort(key=lambda r: (r['key'] not in requested, r['attempts'], r['updated']))
             for row in ready:
                 if stopped(db,row['key'],'raw'): continue
                 item = json.loads(row['item'])

@@ -1,3 +1,4 @@
+import { AdminControls, JobActions } from '../admin/Controls';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Badge, Button, Container, Group, Paper, Progress, Select, SimpleGrid, Stack, Table, Text, TextInput, Title } from '@mantine/core';
 import type { ModelRow } from '../../server/admin/telemetry';
@@ -95,6 +96,7 @@ export default function AdminPage() {
             <Button component="a" href="/api/admin/github/start" disabled={!session.configured}>Sign in with GitHub</Button>
         </Stack></Paper>}
         {session?.authenticated && <>
+            <AdminControls csrf={session.csrf || ''} />
             <Group justify="space-between"><Badge color={connection === 'Live' && !stale ? 'green' : 'yellow'}>{stale ? 'Updates delayed' : connection}</Badge>
                 <Text size="sm" c="dimmed">Updated {stamp(snapshot?.observedAt)}</Text></Group>
             {snapshot && !snapshot.available && <Alert color="yellow">{snapshot.reason}</Alert>}
@@ -111,7 +113,7 @@ export default function AdminPage() {
                 <Select label="Status" value={state} onChange={v => { setState(v); setLimit(50); }} data={states.map(s => ({ value: s, label: s === 'all' ? 'All' : s.replace(/_/g, ' ') }))} /></Group>
             <Text size="sm">{rows.length} matching entries · {snapshot?.models.length || 0} in the collection queue</Text>
             <Table.ScrollContainer minWidth={900}><Table striped highlightOnHover withTableBorder>
-                <Table.Thead><Table.Tr><Table.Th>Model</Table.Th><Table.Th>Collection / provider</Table.Th><Table.Th>State</Table.Th><Table.Th>Responses</Table.Th><Table.Th>Size / GPUs</Table.Th><Table.Th>Worker updated</Table.Th></Table.Tr></Table.Thead>
+                <Table.Thead><Table.Tr><Table.Th>Model</Table.Th><Table.Th>Collection / provider</Table.Th><Table.Th>State</Table.Th><Table.Th>Responses</Table.Th><Table.Th>Size / GPUs</Table.Th><Table.Th>Worker updated</Table.Th><Table.Th>Job controls</Table.Th></Table.Tr></Table.Thead>
                 <Table.Tbody>{rows.slice(0, limit).map(m => <Table.Tr key={m.key}>
                     <Table.Td><Text size="sm" fw={500}>{m.model}</Text></Table.Td>
                     <Table.Td><Text size="sm">{m.mode === 'raw' ? 'Local plain-text' : 'Native chat'}</Text><Text size="xs" c="dimmed">{m.provider}</Text></Table.Td>
@@ -119,6 +121,7 @@ export default function AdminPage() {
                     <Table.Td><Text size="sm">{m.records == null ? '—' : `${m.records} / ${m.expected}`}</Text>{m.records != null && <Progress value={100 * m.records / m.expected} size="xs" mt={4} />}</Table.Td>
                     <Table.Td><Text size="sm">{m.parameters == null ? 'Size unknown' : `${(m.parameters / 1e9).toFixed(2)}B`}</Text><Text size="xs" c="dimmed">{m.gpuCount == null ? (m.mode === 'chat' ? 'API' : 'GPU requirement unknown') : `${m.gpuCount} GPU${m.gpuCount === 1 ? '' : 's'}`}</Text></Table.Td>
                     <Table.Td><Text size="xs">{stamp(m.workerUpdated)}</Text></Table.Td>
+                    <Table.Td><JobActions csrf={session.csrf || ''} job={m}/></Table.Td>
                 </Table.Tr>)}</Table.Tbody>
             </Table></Table.ScrollContainer>
             {rows.length > limit && <Button variant="light" onClick={() => setLimit(n => n + 100)}>Show more models</Button>}
