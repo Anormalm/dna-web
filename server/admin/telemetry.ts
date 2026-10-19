@@ -39,7 +39,7 @@ export class Telemetry {
                 counts[row.mode][row.state] = (counts[row.mode][row.state] || 0) + 1;
                 let item: any = {}; try { item = JSON.parse(row.item || '{}'); } catch { /* missing discovery metadata */ }
                 let status: any = null;
-                if (row.run && ['running', 'chat_running', 'failed', 'chat_failed', 'ready', 'chat_prepared'].includes(row.state)) {
+                if (row.run && ['running', 'chat_running', 'failed', 'chat_failed', 'ready', 'chat_prepared', 'paused'].includes(row.state)) {
                     status = await readJson(join(row.run, 'models', String(row.idx || 0).padStart(3, '0'), 'status.json'));
                 }
                 let alive: boolean | null = null;
