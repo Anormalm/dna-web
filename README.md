@@ -11,6 +11,8 @@ A versioned backend adds Linear/RBF nearest-reference identification and separat
 v1/v2 Community Lab proposals. Run `npm ci && npm run server`; a four-checkpoint
 example bank is included. Larger compatible banks use `DISTDNA_DATA_DIR`.
 See [API, protocol and validation](docs/DISTDNA.md).
+For collection across both legacy catalogs, see the
+[full-catalog enrollment workflow](docs/DISTDNA_ENROLLMENT.md).
 
 ## 🌟 Overview
 
