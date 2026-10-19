@@ -2,6 +2,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { AdminAuth, adminConfig, cookie, setCookie, sessionCookie, validMutation, type AdminConfig } from './auth.js';
 import { Telemetry } from './telemetry.js';
+import { Operations, AdminOperationError } from './operations.js';
 
 export function createAdminRouter(config: AdminConfig | null = adminConfig(), fetcher: typeof fetch = fetch, intervalMs = 2500) {
     const router = express.Router();
@@ -9,6 +10,7 @@ export function createAdminRouter(config: AdminConfig | null = adminConfig(), fe
     const initialized = auth?.init();
     void initialized?.catch(() => {}); // Requests report initialization failures without leaking details.
     const telemetry = new Telemetry(config?.runDir);
+    const operations = new Operations(config);
     const connections = new Map<express.Response, NodeJS.Timeout>();
     const wrap = (fn: (req: express.Request, res: express.Response) => Promise<any>) =>
         (req: express.Request, res: express.Response, next: express.NextFunction) => { void fn(req, res).catch(next); };
@@ -50,6 +52,7 @@ export function createAdminRouter(config: AdminConfig | null = adminConfig(), fe
         setCookie(res, config!, sessionCookie, '', 0);
         res.json({ ok: true });
     }));
+    router.post('/estimate', wrap(async (req, res) => { res.json(await operations.call('estimate', req.body, res.locals.admin.user_id)); }));
     router.get('/snapshot', wrap(async (_req, res) => { res.json(await telemetry.snapshot()); }));
     router.get('/events', wrap(async (req, res) => {
         if (connections.size >= 8) return res.status(429).json({ error: 'Too many live admin connections.' });
@@ -73,7 +76,7 @@ export function createAdminRouter(config: AdminConfig | null = adminConfig(), fe
         await send();
     }));
     router.use((_error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-        if (!res.headersSent) res.status(503).json({ error: 'Administrator service is temporarily unavailable.' });
+        if (!res.headersSent) res.status(_error instanceof AdminOperationError ? _error.status : 503).json({ error: _error instanceof AdminOperationError ? _error.message : 'Administrator service is temporarily unavailable.' });
     });
     return { router, close: async () => { for (const [res, timer] of connections) { clearInterval(timer); res.end(); } await initialized; await telemetry.close(); await auth?.close(); } };
 }
