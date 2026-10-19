@@ -20,6 +20,7 @@ import urllib.request
 from common import read, write, sha, expected_rows, row_key, load_records
 from provider_config import openrouter_key
 from full_catalog import connection, update
+from admin_runtime import init_queue, reconcile, stopped, budget
 
 API = 'https://openrouter.ai/api/v1'
 
@@ -333,9 +334,12 @@ def launch(run,cap):
     verify_encoder_runtime()
     prepare_all(run)
     db=connection(run)
+    init_queue(db)
     active={}
     try:
         while True:
+            reconcile(db)
+            cap=budget(run)['capUsd']
             for k,(child,folder) in list(active.items()):
                 if child.poll() is None: continue
                 status=read(folder/'models/000/status.json') if (folder/'models/000/status.json').exists() else {}
@@ -358,10 +362,11 @@ def launch(run,cap):
             pending=db.execute("SELECT * FROM jobs WHERE mode='chat' AND state='chat_prepared' AND retry_after<=? ORDER BY CASE WHEN model='openai/gpt-4o-mini' THEN 0 ELSE 1 END,model",(time.time(),)).fetchall()
             # Two models, four bounded in-flight calls per model.
             for row in pending[:max(0,2-running)]:
+                if stopped(db,row['key'],'chat') or budget(run)['remainingUsd']<=0: continue
                 folder=Path(row['run'])
                 with (folder/'worker.log').open('a') as stream:
-                    child=subprocess.Popen([sys.executable,str(frozen_worker(folder)),'collect','--run',str(run),
-                        '--job',str(folder),'--max-cost-usd',str(cap)],stdin=subprocess.DEVNULL,stdout=stream,
+                    child=subprocess.Popen([sys.executable,str(Path(__file__).with_name('admin_chat_worker.py')),'--run',str(run),
+                        '--job',str(folder),'--key',row['key'],'--billing', (db.execute('SELECT billing FROM admin_job_intents WHERE key=?',(row['key'],)).fetchone() or ['openrouter'])[0]],stdin=subprocess.DEVNULL,stdout=stream,
                         stderr=subprocess.STDOUT,start_new_session=True,env=dict(os.environ,PYTHONNOUSERSITE='1',
                         OPENBLAS_NUM_THREADS='4',OMP_NUM_THREADS='4',MKL_NUM_THREADS='4',TOKENIZERS_PARALLELISM='false'))
                 active[row['key']]=(child,folder)
