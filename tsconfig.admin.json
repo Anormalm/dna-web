@@ -9,6 +9,7 @@
   "include": [
     "server/admin",
     "src/pages/admin.tsx",
+    "src/pages/admin-demo.tsx",
     "src/admin",
     "test/admin.test.ts"
   ],

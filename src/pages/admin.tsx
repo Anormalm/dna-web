@@ -84,6 +84,7 @@ export default function AdminPage() {
     }
     return <Container size="xl" py="xl"><Stack gap="lg">
         <Group justify="space-between"><div><Title order={1}>Administration</Title><Text c="dimmed">Live enrollment and collection status</Text></div>
+            <Button component="a" href="/admin-demo" variant="light">Try workflow demo</Button>
             {session?.authenticated && <Group><Text size="sm">{session.user?.login}</Text><Button variant="default" onClick={logout}>Sign out</Button></Group>}
         </Group>
         {error && <Alert color="red">{error}</Alert>}
