@@ -21,6 +21,8 @@ const headers={'x-dna-bridge-key':'test-private-key'};
 await call('/__bridge/poll',{method:'POST',headers});
 const awaiting=call('/api/admin/github/callback?state=state&code=code',{headers:{cookie:'dna_admin_oauth=browser'}});
 await new Promise(r=>setTimeout(r,50));
+const noCapacity=await(await call('/__bridge/poll',{method:'POST',headers,body:JSON.stringify({capacity:0})})).json();
+assert.equal(noCapacity.jobs.length,0);
 const jobs=await(await call('/__bridge/poll',{method:'POST',headers})).json();
 assert.equal(jobs.jobs.length,1);
 assert.equal(jobs.jobs[0].headers.cookie,'dna_admin_oauth=browser');

@@ -26,6 +26,9 @@ export async function handler(request, env, ctx) {
     if (!env.BUCKET) return json({ error: 'Bridge storage unavailable' }, 503);
     if (path === '/__bridge/poll' && request.method === 'POST') {
       await env.BUCKET.put('bridge-heartbeat', JSON.stringify({ at: Date.now() }));
+      let capacity = 3;
+      try { const input = await request.json(); if (Number.isInteger(input.capacity)) capacity = Math.max(0, Math.min(3, input.capacity)); } catch { /* legacy agents send no capacity */ }
+      if (!capacity) return json({ jobs: [] });
       const listed = await env.BUCKET.list({ prefix: 'requests/', limit: 12 });
       const jobs = [];
       for (const item of listed.objects) {
@@ -35,7 +38,7 @@ export async function handler(request, env, ctx) {
         if (job.claimed) continue;
         const claimed = await env.BUCKET.put(item.key, JSON.stringify({ ...job, claimed: true }), { onlyIf: { etagMatches: stored.etag } });
         if (claimed) jobs.push(job);
-        if (jobs.length === 3) break;
+        if (jobs.length === capacity) break;
       }
       return json({ jobs });
     }

@@ -47,12 +47,16 @@ async function handle(job) {
 }
 console.log('Collector bridge started; forwarding only preview API routes.');
 let failures = 0;
+const active = new Map();
 while (!stopping) {
   try {
-    const response = await fetch(origin + '/__bridge/poll', { method:'POST', headers:auth, body:'{}', signal:AbortSignal.timeout(15_000) });
+    const response = await fetch(origin + '/__bridge/poll', { method:'POST', headers:auth, body:JSON.stringify({ capacity: Math.max(0, 3-active.size) }), signal:AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error('Bridge not ready');
     const { jobs } = await response.json();
-    await Promise.all(jobs.map(handle));
+    for (const job of jobs) {
+      const task = handle(job).catch(() => { console.log('Collector request failed; browser may retry.'); }).finally(() => active.delete(job.id));
+      active.set(job.id, task);
+    }
     if (failures) console.log('Collector connection recovered.'); failures = 0;
     await pause(jobs.length ? 200 : 2000);
   } catch {
@@ -60,3 +64,5 @@ while (!stopping) {
     await pause(3000);
   }
 }
+
+await Promise.allSettled(active.values());
