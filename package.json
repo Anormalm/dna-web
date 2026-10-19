@@ -13,6 +13,8 @@
     "build:data": "node scripts/build_database.js",
     "test": "vitest run",
     "test:distdna": "vitest run test/distdna.test.ts test/distdna-api.test.ts test/distdna-lab.test.ts test/distdna-binary.test.ts",
+    "test:admin": "vitest run test/admin.test.ts",
+    "typecheck:admin": "tsc --project tsconfig.admin.json",
     "typecheck:distdna": "tsc --project tsconfig.distdna.json"
   },
   "dependencies": {

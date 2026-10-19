@@ -3,6 +3,7 @@
  */
 import express from 'express';
 import { createDistDnaRouter } from './distdna/router.js';
+import { createAdminRouter } from './admin/router.js';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { initDatabase } from './database.js';
@@ -34,6 +35,8 @@ app.use('/api', limiter);
 const distdna = createDistDnaRouter();
 app.use('/api/v2', distdna.router);
 app.use(express.json());
+const admin = createAdminRouter();
+app.use('/api/admin', admin.router);
 
 // Routes
 app.use('/api', submissionRouter);
