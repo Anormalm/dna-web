@@ -9,6 +9,7 @@ dist/
 *.tsbuildinfo
 
 # Environment files
+admin.env
 openrouter.env
 huggingface.env
 .env
