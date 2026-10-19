@@ -19,7 +19,7 @@ if (process.argv.includes('--daemon')) {
 const origin = new URL(configuration.origin).origin;
 if (!origin.endsWith('.chatgpt.site') || !origin.startsWith('https://')) throw new Error('Invalid hosted origin');
 const auth = { 'OAI-Sites-Authorization': 'Bearer ' + configuration.token, 'X-DNA-Bridge-Key': configuration.token, 'Content-Type': 'application/json' };
-const allowed = new Set(['GET /api/admin/session','GET /api/admin/github/start','GET /api/admin/github/callback','GET /api/admin/snapshot','POST /api/admin/logout','GET /api/v2/catalog','GET /api/v2/health','POST /api/v2/identify']);
+const allowed = new Set(['GET /api/admin/session','GET /api/admin/github/start','GET /api/admin/github/callback','GET /api/admin/snapshot', 'GET /api/admin/controls', 'POST /api/admin/estimate', 'POST /api/admin/jobs', 'POST /api/admin/job-action', 'POST /api/admin/budget', 'POST /api/admin/collection-action','POST /api/admin/logout','GET /api/v2/catalog','GET /api/v2/health','POST /api/v2/identify']);
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 let stopping = false;
 process.on('SIGTERM', () => { stopping = true; });
@@ -47,12 +47,16 @@ async function handle(job) {
 }
 console.log('Collector bridge started; forwarding only preview API routes.');
 let failures = 0;
+const active = new Map();
 while (!stopping) {
   try {
-    const response = await fetch(origin + '/__bridge/poll', { method:'POST', headers:auth, body:'{}', signal:AbortSignal.timeout(15_000) });
+    const response = await fetch(origin + '/__bridge/poll', { method:'POST', headers:auth, body:JSON.stringify({ capacity: Math.max(0, 3-active.size) }), signal:AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error('Bridge not ready');
     const { jobs } = await response.json();
-    await Promise.all(jobs.map(handle));
+    for (const job of jobs) {
+      const task = handle(job).catch(() => { console.log('Collector request failed; browser may retry.'); }).finally(() => active.delete(job.id));
+      active.set(job.id, task);
+    }
     if (failures) console.log('Collector connection recovered.'); failures = 0;
     await pause(jobs.length ? 200 : 2000);
   } catch {
@@ -60,3 +64,5 @@ while (!stopping) {
     await pause(3000);
   }
 }
+
+await Promise.allSettled(active.values());

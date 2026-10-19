@@ -1,10 +1,10 @@
-import json,sqlite3,sys,tempfile,unittest,time
+import json,sqlite3,sys,tempfile,unittest,time,subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts/distdna_enrollment'))
 from admin_control import dispatch
-from admin_runtime import init_queue,init_money,budget,reserve,reconcile_cost,ControlError,apply_state,stopped,worker_identity
+from admin_runtime import init_queue,init_money,budget,reserve,reconcile_cost,ControlError,apply_state,stopped,worker_identity,signal_worker
 from admin_estimates import schema
 from full_catalog import connection
 class Controls(unittest.TestCase):
@@ -53,6 +53,16 @@ class Controls(unittest.TestCase):
   with self.assertRaises(ControlError):dispatch(self.run,'job',{'key':key,'operation':'start'},7)
   self.assertIsNone(worker_identity(1,self.run))
   with self.assertRaises(ControlError):dispatch(self.run,'job',{'key':"x';DROP TABLE jobs;--",'operation':'start'},7)
+ def test_stop_signals_only_the_matched_test_worker(self):
+  script=self.run/'full_collect.py';script.write_text('import time; time.sleep(60)')
+  child=subprocess.Popen([sys.executable,str(script),'--run',str(self.run)])
+  try:
+   self.assertFalse(signal_worker(child.pid,self.run/'unrelated'))
+   self.assertIsNone(child.poll())
+   self.assertTrue(signal_worker(child.pid,self.run))
+   self.assertLess(child.wait(timeout=5),0)
+  finally:
+   if child.poll() is None:child.terminate();child.wait()
  def test_byok_and_expired_quotes_require_explicit_setup(self):
   with connection(self.run) as db:
    db.execute("UPDATE admin_quotes SET billing='byok',mode='chat'");db.commit()

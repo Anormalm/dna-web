@@ -108,6 +108,15 @@ describe('GitHub administrator boundary', () => {
         expect(validMutation(fake as any, config, { csrf: 'a'.repeat(43) } as any)).toBe(false);
     });
 
+    it('protects every collection mutation with login and CSRF', async () => {
+        const auth = await login();
+        for (const route of ['estimate','jobs','job-action','budget','collection-action']) {
+            await request(app).post('/api/admin/'+route).send({}).expect(401);
+            await request(app).post('/api/admin/'+route).set('Cookie',auth.cookie).send({}).expect(403);
+        }
+        await request(app).get('/api/admin/controls').expect(401);
+    });
+
     it('rejects expired sessions and expired OAuth requests', async () => {
         const auth = await login();
         const start = await request(app).get('/api/admin/github/start');

@@ -17,7 +17,7 @@ export function createPreviewApp(dist = resolve('dist'), backend = 'http://127.0
     app.use((_req, res, next) => { res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY' }); next(); });
     const allowed = new Set([
         'GET /api/admin/session', 'GET /api/admin/github/start', 'GET /api/admin/github/callback',
-        'GET /api/admin/snapshot', 'POST /api/admin/logout',
+        'GET /api/admin/snapshot', 'GET /api/admin/controls', 'POST /api/admin/estimate', 'POST /api/admin/jobs', 'POST /api/admin/job-action', 'POST /api/admin/budget', 'POST /api/admin/collection-action', 'POST /api/admin/logout',
         'GET /api/v2/catalog', 'GET /api/v2/health', 'POST /api/v2/identify',
     ]);
     app.use('/api', (req, res) => {
