@@ -10,12 +10,57 @@ from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts/distdna_enrollment'))
-from full_catalog import gpu_count, job_key, model_id, select_files, make_job,json_metadata,cached_native_snapshot,connection,release_owned_staging
+from full_catalog import gpu_count, job_key, model_id, select_files, make_job,json_metadata,cached_native_snapshot,connection,release_owned_staging,download_model,safe_download_error
 from common import read, write, sha, verify_run
 from provider_config import openrouter_key
 
 
 class FullCatalogTests(unittest.TestCase):
+    def test_bundle_import_requires_byte_identical_source_archive(self):
+        from full_bundle import verify_collection_source
+        with tempfile.TemporaryDirectory() as tmp:
+            run=Path(tmp);original=run/'collect.py';saved=run/'archive.py'
+            original.write_text('original source\n');saved.write_bytes(original.read_bytes())
+            spec={'frozenFiles':{str(original):sha(original)}};write(run/'run.json',spec)
+            original.write_text('changed source\n')
+            with self.assertRaises(ValueError):verify_collection_source(run)
+            write(run/'archived-inputs.json',{'files':{str(original):str(saved)}})
+            self.assertEqual(verify_collection_source(run),spec)
+            with self.assertRaises(ValueError):verify_run(run)
+            saved.write_text('wrong archive\n')
+            with self.assertRaises(ValueError):verify_collection_source(run)
+
+    def test_native_gpu_placement_without_device_map(self):
+        from native_quantized_collect import verify_gpu_placement
+        gpu = SimpleNamespace(type='cuda',index=0)
+        model = SimpleNamespace(parameters=lambda:[SimpleNamespace(device=gpu)],
+            get_input_embeddings=lambda:SimpleNamespace(weight=SimpleNamespace(device=gpu)))
+        verify_gpu_placement(model)
+        model.hf_device_map={'layer':'cpu'}
+        with self.assertRaises(RuntimeError):verify_gpu_placement(model)
+        model.hf_device_map={}
+        model.parameters=lambda:[SimpleNamespace(device=SimpleNamespace(type='meta',index=None))]
+        with self.assertRaises(RuntimeError):verify_gpu_placement(model)
+
+    def test_downloads_use_isolated_http_workers_and_recover_after_failure(self):
+        import subprocess
+        results = [subprocess.CompletedProcess([],1,'','Network failure'),
+                   subprocess.CompletedProcess([],0,json.dumps({'snapshot':'/staging/b'}),'')]
+        with patch('full_catalog.subprocess.run', side_effect=results) as run:
+            with self.assertRaisesRegex(RuntimeError,'Network failure'):
+                download_model('a/failed',{},'/staging')
+            self.assertEqual(download_model('b/ok',{},'/staging')['snapshot'],'/staging/b')
+        self.assertEqual(run.call_count,2)
+        self.assertEqual(run.call_args.args[0][0],sys.executable)
+        self.assertEqual(run.call_args.kwargs['env']['HF_HUB_DISABLE_XET'],'1')
+        self.assertEqual(json.loads(run.call_args.kwargs['input'])['name'],'b/ok')
+
+    def test_download_errors_hide_tokens_and_signed_url_queries(self):
+        with patch.dict('os.environ',{'HF_TOKEN':'test-private-value'}):
+            text = safe_download_error('test-private-value https://example.org/file?signature=private')
+        self.assertNotIn('test-private-value',text)
+        self.assertNotIn('signature=private',text)
+
     def test_native_cache_requires_complete_weights_and_registered_runtime(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder=Path(tmp);revision='a'*40;snapshot=folder/'snapshots'/revision
@@ -57,6 +102,11 @@ class FullCatalogTests(unittest.TestCase):
             self.assertEqual(manifest['nativeRuntime']['version'],'0.50.2')
             self.assertIn(str(adapter),manifest['frozenFiles'])
             self.assertEqual(manifest['expectedPerModel'],800)
+            retry = make_job(root,spec,{'key':'native','model':'a/b'},dict(item,jobRevision='loader-v2'))
+            self.assertNotEqual(retry,job)
+            self.assertEqual(verify_run(job),manifest)
+            with self.assertRaises(ValueError):
+                make_job(root,spec,{'key':'native','model':'a/b'},dict(item,jobRevision='../bad'))
 
     def test_private_provider_configuration(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict('os.environ', {}, clear=True):

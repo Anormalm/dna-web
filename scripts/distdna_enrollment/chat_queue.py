@@ -311,6 +311,21 @@ def recover_encoding_failures(db):
                    detail='Encoding saved responses in the verified experiment environment')
 
 
+def recover_transient_failures(db):
+    """Bounded, delayed retries keep the frozen route, samples and spend ledger."""
+    for row in db.execute("SELECT * FROM jobs WHERE mode='chat' AND state='chat_failed'").fetchall():
+        if row['attempts'] >= 4 or not row['run']:
+            continue
+        path = Path(row['run'])/'models/000/status.json'
+        status = read(path) if path.exists() else {}
+        if status.get('errorCode') not in (429,500,502,503,504,'transport'):
+            continue
+        delay = min(3600,300*2**max(0,row['attempts']-1))
+        retry_at = max(row['retry_after'], status.get('updated',time.time())+delay)
+        update(db,row['key'],state='chat_prepared',retry_after=retry_at,
+               detail='Retrying transient provider failure after cooldown; frozen route and saved records retained')
+
+
 def launch(run,cap):
     lock=(run/'chat-controller.lock').open('a')
     fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -338,8 +353,9 @@ def launch(run,cap):
                 elif not Path(f"/proc/{row['pid']}").exists():
                     update(db,row['key'],state='chat_prepared',detail='Resuming saved response records')
             recover_encoding_failures(db)
+            recover_transient_failures(db)
             running=db.execute("SELECT COUNT(*) FROM jobs WHERE mode='chat' AND state='chat_running'").fetchone()[0]
-            pending=db.execute("SELECT * FROM jobs WHERE mode='chat' AND state='chat_prepared' ORDER BY CASE WHEN model='openai/gpt-4o-mini' THEN 0 ELSE 1 END,model").fetchall()
+            pending=db.execute("SELECT * FROM jobs WHERE mode='chat' AND state='chat_prepared' AND retry_after<=? ORDER BY CASE WHEN model='openai/gpt-4o-mini' THEN 0 ELSE 1 END,model",(time.time(),)).fetchall()
             # Two models, four bounded in-flight calls per model.
             for row in pending[:max(0,2-running)]:
                 folder=Path(row['run'])
@@ -359,7 +375,8 @@ def launch(run,cap):
             write(run/'chat-status.json',dict(pid=os.getpid(),updated=time.time(),counts=counts,
                 spendingCeilingUsd=cap,chargedOrReservedUsd=spend,credential='loaded privately',
                 collection='Native chat; fixed route; 640 enrollment + 160 query responses per entry'))
-            if not pending and not running and not active: break
+            waiting=db.execute("SELECT COUNT(*) FROM jobs WHERE mode='chat' AND state='chat_prepared'").fetchone()[0]
+            if not waiting and not running and not active: break
             time.sleep(5)
     finally:
         db.close()

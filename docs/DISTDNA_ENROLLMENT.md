@@ -151,6 +151,27 @@ minutes, allowing newly granted repository access to take effect. This does not
 grant access to gated repositories: the account needs the relevant approvals.
 `hf-access-status.json` records only authentication status and retry counts.
 
+## Recovery without changing the sampling protocol
+
+Each checkpoint download runs in a fresh process with Xet disabled and HTTP
+transfer enabled. This isolates downloader failures between repositories while
+retaining the pinned revision and checksum checks. Downloads have up to three
+attempts with increasing delays. Chat workers reuse their archived source,
+provider route, completed responses and spending ledger; temporary 429/5xx or
+transport failures retry after cooldown, up to four model attempts. Authentication,
+budget and incompatible-request failures remain explicit.
+
+Loader repairs use a new immutable worker archive and a separate job directory
+(`jobRevision`), preserving prior attempts. Single-device quantized models are
+validated from their actual GPU parameter placement even when Transformers omits
+`hf_device_map`.
+
+For read-only bundle import, a legacy run can supply `archived-inputs.json` with a
+`files` mapping from original source paths to archived copies. Every copy must
+match the original frozen checksum. This supports verification after an editable
+checkout changes; collector execution still uses strict original-path checks.
+Response files and original completion/run manifests are preserved.
+
 ## Validation
 
 ```bash

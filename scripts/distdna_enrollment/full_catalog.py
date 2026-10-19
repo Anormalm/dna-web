@@ -171,6 +171,29 @@ def inspect_model(name, caches, metadata_dir, native_runtimes=None):
 
 
 def download_model(name, item, staging):
+    # A failed hf-xet task can poison the process-wide client for later repos.
+    # Use an isolated process and ordinary HTTP downloads for each checkpoint.
+    env = dict(os.environ, HF_HUB_DISABLE_XET='1', HF_HUB_DISABLE_PROGRESS_BARS='1',
+               HF_HUB_VERBOSITY='error', HF_DEBUG='0', HF_HUB_DOWNLOAD_TIMEOUT='60',
+               PYTHONNOUSERSITE='1')
+    result = subprocess.run([sys.executable, str(Path(__file__).resolve()), 'download-one'],
+        input=json.dumps(dict(name=name, item=item, staging=str(staging))),
+        text=True, capture_output=True, env=env, timeout=12*3600)
+    if result.returncode:
+        raise RuntimeError(safe_download_error(result.stderr or f'Download worker exit {result.returncode}'))
+    return json.loads(result.stdout)
+
+
+def safe_download_error(message):
+    token = os.environ.get('HF_TOKEN')
+    if token:
+        message = message.replace(token, '[redacted]')
+    message = re.sub(r'hf_[A-Za-z0-9]{12,}', '[redacted]', message)
+    message = re.sub(r'(https?://[^\s?]+)\?[^\s]+', r'\1?[redacted]', message)
+    return message[-1600:]
+
+
+def _download_model(name, item, staging):
     from huggingface_hub import snapshot_download
     target = Path(staging) / job_key('raw', name)
     target.mkdir(parents=True, exist_ok=True)
@@ -254,6 +277,11 @@ def connection(run):
     db.execute('CREATE TABLE IF NOT EXISTS jobs (key TEXT PRIMARY KEY, mode TEXT, model TEXT, '
                'state TEXT, detail TEXT, item TEXT, run TEXT, idx INTEGER DEFAULT 0, '
                'pid INTEGER, attempts INTEGER DEFAULT 0, updated REAL)')
+    columns = {r[1] for r in db.execute('PRAGMA table_info(jobs)')}
+    for name, definition in [('download_attempts', 'INTEGER NOT NULL DEFAULT 0'),
+                             ('retry_after', 'REAL NOT NULL DEFAULT 0')]:
+        if name not in columns:
+            db.execute(f'ALTER TABLE jobs ADD COLUMN {name} {definition}')
     db.commit()
     return db
 
@@ -327,7 +355,10 @@ def prepare(args):
 
 
 def make_job(run, spec, row, item):
-    folder = run / 'jobs' / row['key']
+    revision = item.get('jobRevision', '')
+    if revision and not re.fullmatch('[a-zA-Z0-9_-]+', revision):
+        raise ValueError('Invalid collection retry directory suffix')
+    folder = run / 'jobs' / (row['key'] + ('-'+revision if revision else ''))
     if (folder / 'run.json').exists():
         return folder
     folder.mkdir(parents=True, exist_ok=True)
@@ -479,9 +510,13 @@ def run_queue(run):
                         update(db, key, state='ready' if item.get('snapshot') else 'discovered',
                                item=json.dumps(item), detail=None)
                     except Exception as exc:
-                        # Network failures are distinguishable and explicitly retryable.
-                        label = 'download_failed' if kind == 'download' else 'blocked'
-                        update(db, key, state=label, detail=str(exc)[:1600])
+                        message = safe_download_error(str(exc))
+                        attempt = db.execute('SELECT download_attempts FROM jobs WHERE key=?',(key,)).fetchone()[0]
+                        if kind == 'download' and attempt < 3:
+                            update(db, key, state='discovered', detail=message,
+                                   retry_after=time.time()+60*2**max(0,attempt-1))
+                        else:
+                            update(db, key, state='download_failed' if kind == 'download' else 'blocked', detail=message)
             pending = db.execute("SELECT * FROM jobs WHERE state='pending' AND mode='raw' ORDER BY model").fetchall()
             # Prioritize complete caches, then small catalog sizes, without dropping any entry.
             def priority(row):
@@ -494,7 +529,7 @@ def run_queue(run):
                 future = executor.submit(inspect_model, row['model'], spec['caches'], run / 'metadata', spec.get('nativeRuntimes'))
                 inspection[future] = row['key']
             ready = db.execute("SELECT * FROM jobs WHERE state='ready' AND mode='raw'").fetchall()
-            discovered = db.execute("SELECT * FROM jobs WHERE state='discovered' ORDER BY updated").fetchall()
+            discovered = db.execute("SELECT * FROM jobs WHERE state='discovered' AND retry_after<=? ORDER BY updated",(time.time(),)).fetchall()
             discovered.sort(key=lambda r: json.loads(r['item'])['weightBytes'])
             Path(spec['staging']).mkdir(parents=True, exist_ok=True)
             release_owned_staging(spec, db, active)
@@ -506,7 +541,7 @@ def run_queue(run):
                 if shutil.disk_usage(spec['staging']).free < reserve + item['weightBytes']:
                     break
                 reserve += item['weightBytes']
-                update(db, row['key'], state='downloading')
+                update(db, row['key'], state='downloading', download_attempts=row['download_attempts']+1)
                 downloads[executor.submit(download_model, row['model'], item, spec['staging'])] = row['key']
             av = availability()
             for gpu, available in av.items():
@@ -577,6 +612,7 @@ def run_queue(run):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
+    sub.add_parser('download-one')
     init = sub.add_parser('start')
     for name in ['research', 'base', 'collection', 'raw', 'chat', 'output', 'staging']:
         init.add_argument('--'+name, type=Path, required=True)
@@ -587,7 +623,14 @@ def main():
     status = sub.add_parser('status')
     status.add_argument('--run', type=Path, required=True)
     args = parser.parse_args()
-    if args.command == 'status':
+    if args.command == 'download-one':
+        try:
+            request = json.load(sys.stdin)
+            print(json.dumps(_download_model(request['name'], request['item'], request['staging'])))
+        except Exception as exc:
+            print(safe_download_error(f'{type(exc).__name__}: {exc}'), file=sys.stderr)
+            raise SystemExit(1)
+    elif args.command == 'status':
         print(json.dumps(read(args.run / 'status.json'), indent=2))
     else:
         run_queue(prepare(args) if args.command == 'start' else args.run.resolve())

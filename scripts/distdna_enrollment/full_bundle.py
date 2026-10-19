@@ -19,6 +19,27 @@ from common import read, sha, verify_run, write
 from merge import squared_distances, verified_shards
 
 
+def verify_collection_source(run):
+    """Verify original hashes, allowing explicitly archived identical source bytes.
+
+    This is a read-only bundle import path. Collectors continue to use strict
+    verify_run so they cannot execute a changed file by substituting an archive.
+    """
+    mapping = run/'archived-inputs.json'
+    if not mapping.exists():
+        return verify_run(run)
+    spec = read(run/'run.json')
+    archives = read(mapping)['files']
+    for filename, expected in spec['frozenFiles'].items():
+        original = Path(filename)
+        if original.is_file() and sha(original) == expected:
+            continue
+        saved = Path(archives.get(filename, ''))
+        if not saved.is_file() or sha(saved) != expected:
+            raise ValueError(f'Original frozen input is unavailable or changed: {filename}')
+    return spec
+
+
 def queue_rows(run):
     with sqlite3.connect(run / 'queue.sqlite') as db:
         db.row_factory = sqlite3.Row
@@ -59,7 +80,7 @@ def build(run, output):
     shards = []
     for source, indices in grouped.items():
         source = Path(source)
-        source_spec = verify_run(source)
+        source_spec = verify_collection_source(source)
         if source_spec['protocol'] != bank['protocol']:
             raise ValueError('Completed run protocol differs from base gallery')
         for item, folder, train, query in verified_shards(source, source_spec):

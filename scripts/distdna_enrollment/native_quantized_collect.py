@@ -9,6 +9,19 @@ from pathlib import Path
 from common import read
 
 
+def verify_gpu_placement(model):
+    # Transformers may omit hf_device_map for a single-device quantized model.
+    # Inspect actual parameter devices as well as any reported placement map.
+    placements = getattr(model, 'hf_device_map', {})
+    if any(str(d) in ('cpu', 'disk', 'meta') for d in placements.values()):
+        raise RuntimeError('Quantized model requires more GPU memory')
+    parameters = list(model.parameters())
+    if not parameters or any(p.device.type != 'cuda' for p in parameters):
+        raise RuntimeError('Quantized parameters are not fully on GPU')
+    if model.get_input_embeddings().weight.device.index != 0:
+        raise RuntimeError('Expected input embeddings on first visible GPU')
+
+
 def install(spec):
     runtime = spec['nativeRuntime']
     if importlib.metadata.version('bitsandbytes') != runtime['version']:
@@ -40,10 +53,7 @@ def install(spec):
                 max_memory={i: '64GiB' for i in range(count)})
             if not getattr(model, 'is_quantized', False):
                 raise RuntimeError('Native quantized weights were not loaded as quantized')
-            if any(str(d) in ('cpu', 'disk') for d in model.hf_device_map.values()):
-                raise RuntimeError('Quantized model requires more GPU memory')
-            if model.get_input_embeddings().weight.device.index != 0:
-                raise RuntimeError('Expected input embeddings on first visible GPU')
+            verify_gpu_placement(model)
             resolved = getattr(model.config, '_commit_hash', None)
             if resolved is not None and resolved != revision:
                 raise RuntimeError('Checkpoint revision mismatch')

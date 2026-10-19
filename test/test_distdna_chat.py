@@ -9,7 +9,7 @@ import io
 import json
 import sqlite3
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts/distdna_enrollment'))
-from chat_queue import choose_endpoint,build_payload,reserve_cost,record_cost,completion,ApiFailure,frozen_worker,recover_encoding_failures,verify_encoder_runtime
+from chat_queue import choose_endpoint,build_payload,reserve_cost,record_cost,completion,ApiFailure,frozen_worker,recover_encoding_failures,recover_transient_failures,verify_encoder_runtime
 from common import write,sha
 from full_catalog import connection
 
@@ -19,6 +19,24 @@ def endpoint(tag='openai',provider='OpenAI'):
 
 
 class ChatTests(unittest.TestCase):
+    def test_transient_retries_have_cooldown_and_preserve_permanent_failures(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);db=connection(root)
+            for name,code,attempts in [('rate',429,1),('timeout','transport',2),('bad',400,1),('auth',401,1),('budget','budget',1),('exhausted',503,4)]:
+                folder=root/name
+                write(folder/'models/000/status.json',dict(errorCode=code,updated=1000,records=300))
+                db.execute('INSERT INTO jobs(key,mode,model,state,run,attempts) VALUES(?,?,?,?,?,?)',
+                    (name,'chat',name,'chat_failed',str(folder),attempts))
+            db.commit();recover_transient_failures(db)
+            rows={r['key']:r for r in db.execute('SELECT * FROM jobs')}
+            self.assertEqual(rows['rate']['state'],'chat_prepared')
+            self.assertEqual(rows['rate']['retry_after'],1300)
+            self.assertEqual(rows['timeout']['retry_after'],1600)
+            for name in ['bad','auth','budget','exhausted']:
+                self.assertEqual(rows[name]['state'],'chat_failed')
+            self.assertEqual(json.loads((root/'rate/models/000/status.json').read_text())['records'],300)
+            db.close()
+
     def test_resume_uses_frozen_worker_and_rejects_changed_code(self):
         with tempfile.TemporaryDirectory() as d:
             folder=Path(d); worker=folder/'chat_queue.py'
