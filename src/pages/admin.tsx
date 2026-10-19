@@ -31,14 +31,41 @@ export default function AdminPage() {
     useEffect(() => {
         if (!session?.authenticated) return;
         const events = new EventSource('/api/admin/events');
+        const abort = new AbortController();
+        let polling: ReturnType<typeof setInterval> | undefined;
+        let pending = false;
+        const expire = () => { events.close(); setSession({ configured: true, authenticated: false }); setSnapshot(null); };
+        const receive = (value: Snapshot) => { setSnapshot(value); setConnection('Live'); setError(''); };
+        const poll = async () => {
+            if (pending || abort.signal.aborted) return;
+            pending = true;
+            try {
+                const response = await fetch('/api/admin/snapshot', { signal: abort.signal });
+                if (response.status === 401) { expire(); return; }
+                if (!response.ok) throw new Error('Status update unavailable');
+                const value = await response.json();
+                if (!abort.signal.aborted) receive(value);
+            } catch { if (!abort.signal.aborted) setConnection('Reconnecting'); }
+            finally { pending = false; }
+        };
+        const startPolling = () => {
+            if (polling || abort.signal.aborted) return;
+            events.close(); clearTimeout(streamTimeout);
+            polling = setInterval(() => { void poll(); }, 5000);
+            void poll();
+        };
+        // Some hosting proxies reject or buffer event streams; use the same
+        // authenticated snapshot API when no stream update arrives in time.
+        const streamTimeout = setTimeout(startPolling, 8000);
         events.addEventListener('snapshot', event => {
-            try { setSnapshot(JSON.parse((event as MessageEvent).data)); setConnection('Live'); setError(''); }
+            clearTimeout(streamTimeout);
+            try { receive(JSON.parse((event as MessageEvent).data)); }
             catch { setError('Unable to read the latest update.'); }
         });
-        events.addEventListener('expired', () => { events.close(); setSession({ configured: true, authenticated: false }); setSnapshot(null); });
-        events.onerror = () => setConnection('Reconnecting');
+        events.addEventListener('expired', expire);
+        events.onerror = startPolling;
         const timer = setInterval(() => setClock(Date.now()), 1000);
-        return () => { events.close(); clearInterval(timer); };
+        return () => { abort.abort(); events.close(); clearTimeout(streamTimeout); clearInterval(polling); clearInterval(timer); };
     }, [session?.authenticated]);
     const rows = useMemo(() => (snapshot?.models || []).filter(m =>
         (mode === 'all' || m.mode === mode) && (state === 'all' || m.state === state) &&
