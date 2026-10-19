@@ -1,41 +1,82 @@
-# Temporary HTTPS preview
+# Hosted HTTPS preview
 
-The collector, SQLite databases and large fingerprint bank remain on the worker
-machine. A tunnel makes the built website and selected APIs accessible through
-HTTPS, without requiring the visitor's SSH route or VPN.
+The hosted site serves the existing production build. An outbound collector
+agent connects the hosted API to the worker machine over HTTPS, so visitors do
+not need its SSH route or VPN. Model weights, response banks, SQLite databases,
+and GitHub OAuth credentials stay on the worker machine.
 
-Build with `npm run build`, start the existing backend on port 3002 with the
-private admin environment, then run `node --import tsx server/preview.ts`.
-This gateway binds to loopback port 5180 and serves only `dist/`, the GitHub admin
-routes and DistDNA catalog/identification APIs. Community submissions and the
-legacy proposals database are excluded from this preview. The regular local
-preview is unchanged. Optional gateway settings: `PUBLIC_PREVIEW_PORT`,
-`PUBLIC_PREVIEW_DIST`, `PUBLIC_PREVIEW_BACKEND` (loopback HTTP only).
+## Architecture
 
-For a Cloudflare Quick Tunnel:
+1. `hosting/sites/bridge.js` serves the built frontend and queues allowed API
+   requests in the site's private R2 bucket.
+2. `hosting/sites/collector-agent.mjs` polls over HTTPS, claims requests, forwards
+   them to the loopback preview gateway, and returns the actual responses.
+3. `server/preview.ts` serves only `dist/`, GitHub admin routes, and DistDNA
+   catalog/identification APIs. The existing backend enforces the GitHub ID
+   allowlist, session cookies, OAuth state, and mutation CSRF checks.
+
+The hosted preview excludes legacy community submissions and proposal records.
+Admin updates use the authenticated snapshot API every five seconds. The same
+frontend falls back to polling when an event stream fails or its initial update
+arrives after eight seconds. Requests stop on logout/unmount; expired sessions
+return to sign-in. Connection failures show delayed/reconnecting status.
+
+## Build and deployment
+
+Build the desired frontend branch with `npm run build`, then run:
 
 ```sh
-cloudflared tunnel --url http://127.0.0.1:5180 --protocol http2 --no-autoupdate
+python scripts/build_sites_preview.py dist /path/to/site-checkout
 ```
 
-Set `DNA_ADMIN_ORIGIN` to the returned HTTPS origin and restart the backend. Update
-the GitHub OAuth App homepage to that origin and callback to
-`https://YOUR-PREVIEW-HOST/api/admin/github/callback`. Keep client credentials
-server-side. HTTPS enables Secure session cookies; the existing GitHub ID
-allowlist and CSRF checks still apply.
+This embeds the compiled assets in `worker/index.js`, omitting hidden files and
+source maps. Use the native Sites project workflow to deploy that checkout with
+an R2 binding named `BUCKET`. Keep the site private to its owner. Configure
+`DNA_BRIDGE_KEY` as a server-side runtime secret equal to this private site's
+service access token; never put it in frontend assets, git, or command arguments.
 
-Quick Tunnels have a temporary hostname, no uptime guarantee, and no SSE support:
-[Cloudflare documentation](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/).
-The gateway rejects the event-stream route and the admin page falls back to the
-same authenticated snapshot API every five seconds. It also falls back if a proxy
-buffers the initial stream for eight seconds. Requests stop on logout/unmount;
-expired sessions return to sign-in. Failures show delayed/reconnecting status.
+Start the existing backend with its private admin environment on port 3002 and
+run `node --import tsx server/preview.ts`. The gateway listens on loopback port
+5180. Optional gateway settings: `PUBLIC_PREVIEW_PORT`, `PUBLIC_PREVIEW_DIST`,
+and `PUBLIC_PREVIEW_BACKEND` (loopback HTTP only). The current collector agent
+always targets port 5180.
 
-This is a preview, not a permanent Vercel deployment. A durable deployment needs
-a stable HTTPS origin and a persistent backend or database/collector bridge.
-Stop the tunnel to remove public access. No weights, raw responses or credentials
-are packaged in the frontend, and opening the preview starts no generation jobs.
+Run `node hosting/sites/collector-agent.mjs --daemon` and supply a single JSON
+line on its hidden stdin containing `origin` (the HTTPS site origin) and `token`
+(the private site's service access token). Use a secure credential mechanism to
+supply it; avoid shell command history. Credentials remain in process memory.
+`DNA_BRIDGE_LOG` selects the daemon log path; it defaults to
+`/tmp/distdna-collector-bridge.log`. Record the returned PID for shutdown.
 
-Validation: `npx vitest run test/preview.test.ts test/admin.test.ts`,
-`npm run typecheck:admin`, and `npm run typecheck:distdna`. Browser checks should
-exercise an SSE failure, multiple polling updates, logout and session expiry.
+Set `DNA_ADMIN_ORIGIN` to the hosted HTTPS origin and `DNA_ADMIN_ALLOW_HTTP=false`,
+then restart the backend. In the existing GitHub OAuth App, set the homepage to
+that origin and the callback to `https://YOUR-SITE/api/admin/github/callback`.
+Visitors first authenticate to the private Site, then sign in with GitHub for
+admin access. No GitHub client secret or access token enters the hosted frontend.
+
+## Operational scope
+
+The hostname is stable, but live APIs require the backend, gateway, and bridge
+agent to remain running. The agent reconnects after transient network failures;
+after a machine restart, an operator must restart it and supply its token again.
+Stop the agent to disconnect the collector, or disable the Site to remove access.
+Opening the preview starts no generation jobs and changes no collection budget.
+
+Requests carry only allowlisted headers. The private bucket temporarily holds
+API request/response data, including OAuth callback codes and session cookies;
+normal requests are deleted after completion. Abandoned requests expire after
+60 seconds and are removed on a subsequent agent poll. Heartbeats older than
+30 seconds produce an explicit offline response. The bridge waits up to 47.5
+seconds for a result and limits uploads to 2 MB and backend responses to 3 MB.
+It handles up to three requests per poll; this is a single-admin preview, not a
+high-throughput production API.
+
+## Validation
+
+Run `npm run test:hosted-preview`, `npm run test:admin`,
+`npm run typecheck:admin`, and `npm run typecheck:distdna`.
+Bridge checks cover private routes, offline behavior, single-claim delivery,
+OAuth redirects and multiple cookies, and request/result cleanup. Browser checks
+should exercise failed event streams, repeated polling updates, logout, and
+session expiry. After deployment, verify the catalog and a saved identification
+query against the local backend, and complete a real GitHub sign-in.

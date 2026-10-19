@@ -1,4 +1,4 @@
-/** Production-build preview gateway for a temporary public HTTPS tunnel.
+/** Production-build preview gateway for the hosted collector bridge.
  * Run with: node --import tsx server/preview.ts
  * Keeps the collector and its filesystem private; serves only dist and explicit API routes.
  */
