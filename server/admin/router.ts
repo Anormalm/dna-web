@@ -52,6 +52,10 @@ export function createAdminRouter(config: AdminConfig | null = adminConfig(), fe
         setCookie(res, config!, sessionCookie, '', 0);
         res.json({ ok: true });
     }));
+    router.get('/controls', wrap(async (_req, res) => { res.json(await operations.call('controls')); }));
+    for (const [path, action] of [['jobs', 'add'], ['job-action','job'], ['budget','budget'], ['collection-action','collection']]) {
+        router.post('/'+path, wrap(async (req, res) => { res.json(await operations.call(action, req.body, res.locals.admin.user_id)); }));
+    }
     router.post('/estimate', wrap(async (req, res) => { res.json(await operations.call('estimate', req.body, res.locals.admin.user_id)); }));
     router.get('/snapshot', wrap(async (_req, res) => { res.json(await telemetry.snapshot()); }));
     router.get('/events', wrap(async (req, res) => {

@@ -63,8 +63,13 @@ export class Telemetry {
                 this.spend ||= await open({ filename: join(this.directory, 'chat-spend.sqlite'), driver: sqlite3.Database, mode: sqlite3.OPEN_READONLY });
                 const b = await this.spend.get(`SELECT COALESCE(SUM(actual),0) spent,
                     COALESCE(SUM(CASE WHEN actual IS NULL THEN reserved ELSE 0 END),0) reserved, MAX(created) lastRequest FROM charges`);
-                budget = { available: true, reportedUsd: b.spent, reservedUsd: b.reserved,
-                    operationalCapUsd: number(chat?.spendingCeilingUsd), lastRequestAt: b.lastRequest ? b.lastRequest * 1000 : null };
+                let upstream = 0, cap: number | null = number(chat?.spendingCeilingUsd);
+                try {
+                    upstream = (await this.spend.get('SELECT COALESCE(SUM(upstream_estimate),0) value FROM admin_cost_details')).value;
+                    cap = number((await this.spend.get('SELECT cap FROM admin_budget WHERE id=1'))?.cap);
+                } catch { /* Legacy run has no admin controls yet. */ }
+                budget = { available: true, reportedUsd: b.spent - upstream, byokInferenceEstimateUsd: upstream, reservedUsd: b.reserved,
+                    operationalCapUsd: cap, lastRequestAt: b.lastRequest ? b.lastRequest * 1000 : null };
             } catch { /* A raw-only run legitimately has no API ledger. */ }
             return { available: true, observedAt: Date.now(), counts, models, budget,
                 controllers: { rawUpdatedAt: raw?.updated ? raw.updated * 1000 : null, chatUpdatedAt: chat?.updated ? chat.updated * 1000 : null } };

@@ -95,7 +95,7 @@ def estimate(run,request):
         public.update(provider=item['tag'],providerName=item['provider_name'],inputUsdPerMillion=float(rates['prompt'])*1e6,
             outputUsdPerMillion=float(rates['completion'])*1e6,expectedInferenceUsd=expected,onePassReservationUsd=reserve,
             byokFeeAllowanceUsd=reserve*.05 if billing=='byok' else 0,observationAt=obs['at'],
-            runtimeHours=None if obs['seconds'] is None else dict(low=804*obs['seconds']/3600*.5,high=804*obs['seconds']/3600*2,samples=None),
+            runtimeHours=None if obs['seconds'] is None else dict(low=804*obs['seconds']/3600*.5*(4 if billing=='byok' else 1),high=804*obs['seconds']/3600*2*(4 if billing=='byok' else 1),samples=None),
             retainedBytesEstimate=12*1024**2,credentialConfigured=bool(openrouter_key(run)),
             providers=[dict(value=e['tag'],label=e.get('provider_name',e['tag'])) for e in data['endpoints'] if e.get('tag') and e.get('status')==0])
         warnings.append('Estimate uses observed token counts and current endpoint list prices; retries, queue wait and private discounts can change cost/time.')

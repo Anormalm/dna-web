@@ -24,6 +24,7 @@ from common import cached_snapshot, read, sha, verify_run, write
 from launch import availability
 from provider_config import openrouter_key
 from hf_access import refresh as refresh_hf_access
+from admin_runtime import init_queue, apply_state, reconcile, stopped
 
 GIB = 2**30
 
@@ -287,6 +288,7 @@ def connection(run):
 
 
 def update(db, key, **fields):
+    fields = apply_state(db, key, fields)
     fields['updated'] = time.time()
     db.execute('UPDATE jobs SET ' + ','.join(k+'=?' for k in fields) + ' WHERE key=?',
                [*fields.values(), key])
@@ -461,6 +463,7 @@ def run_queue(run):
     lock = (run / 'controller.lock').open('a')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     db = connection(run)
+    init_queue(db)
     for filename, digest in spec['frozenFiles'].items():
         if sha(filename) != digest:
             raise ValueError(f'Frozen worker input changed: {filename}')
@@ -478,6 +481,7 @@ def run_queue(run):
     hf_access_state = {}
     try:
         while True:
+            reconcile(db)
             refresh_hf_access(run, db, hf_access_state)
             # Observe externally running phase-2 work, without collecting duplicates.
             for row in db.execute("SELECT * FROM jobs WHERE state IN ('inherited','running')").fetchall():
@@ -535,6 +539,7 @@ def run_queue(run):
             release_owned_staging(spec, db, active)
             reserve = spec['diskReserveGiB']*GIB + sum(json.loads(db.execute('SELECT item FROM jobs WHERE key=?',(k,)).fetchone()[0])['weightBytes'] for k in downloads.values())
             for row in discovered:
+                if stopped(db,row['key'],'raw'): continue
                 if len(downloads) >= 2 or len(downloads)+len(ready) >= spec['maxPreparedJobs']:
                     break
                 item = json.loads(row['item'])
@@ -548,6 +553,7 @@ def run_queue(run):
                 idle[gpu] = idle.get(gpu, 0)+1 if available else 0
             ready.sort(key=lambda r: (r['attempts'], r['updated']))
             for row in ready:
+                if stopped(db,row['key'],'raw'): continue
                 item = json.loads(row['item'])
                 candidates = [g for g in sorted(av) if av[g] and idle.get(g, 0) >= 2]
                 if len(candidates) < item['gpuCount']:
